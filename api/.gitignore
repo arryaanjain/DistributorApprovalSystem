@@ -1,0 +1,67 @@
+# ==========================================
+# 1. Go Binaries and Build Artifacts
+# ==========================================
+# Compiled binaries (adjust app name if desired)
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage reports
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# ==========================================
+# 2. Dependency Modules
+# ==========================================
+# Kept only if you don't use 'go mod vendor' 
+# vendor/
+
+# Go workspaces
+go.work
+go.work.sum
+
+# ==========================================
+# 3. Environment and Configuration
+# ==========================================
+# Local environment variables containing credentials
+.env
+.env.local
+.env.*.local
+
+# Certs for local HTTPS development
+*.pem
+*.key
+
+# ==========================================
+# 4. Web Frontend Assets (If Monorepo)
+# ==========================================
+# Node dependencies and build outputs
+node_modules/
+.npm/
+/frontend/dist/
+/frontend/.next/
+*.log
+
+# ==========================================
+# 5. IDEs and Editors
+# ==========================================
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# ==========================================
+# 6. Operating System Files
+# ==========================================
+.DS_Store
+Thumbs.db
