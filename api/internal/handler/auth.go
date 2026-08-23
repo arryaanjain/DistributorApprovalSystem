@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/apperrors"
@@ -166,10 +167,12 @@ func writeAppError(w http.ResponseWriter, err error) {
 		case apperrors.CodeInsufficientCredit:
 			response.Error(w, http.StatusPaymentRequired, string(ae.Code), ae.Message)
 		default:
+			log.Printf("[ERROR] internal app error: %v", ae)
 			response.InternalError(w)
 		}
 		return
 	}
+	log.Printf("[ERROR] unexpected server error: %v", err)
 	response.InternalError(w)
 }
 

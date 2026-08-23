@@ -73,8 +73,11 @@ func (h *AdminHandler) GetApplication(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "id")
 	app, err := h.distRepo.GetApplicationByID(r.Context(), appID)
 	if err != nil || app == nil {
-		response.NotFound(w, "application not found")
-		return
+		app, err = h.distRepo.GetActiveApplication(r.Context(), appID)
+		if err != nil || app == nil {
+			response.NotFound(w, "application not found")
+			return
+		}
 	}
 
 	dist, _ := h.distRepo.GetByID(r.Context(), app.DistributorID)
