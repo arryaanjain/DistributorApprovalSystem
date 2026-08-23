@@ -17,19 +17,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAuthToken());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!getAuthToken());
   const [user, setUser] = useState<AuthUser | null>(() => {
     const saved = localStorage.getItem('kresconet_admin_user');
-    return saved ? JSON.parse(saved) : { id: 'EMP-001', name: 'Risk Admin', role: 'credit_manager' };
+    return saved ? JSON.parse(saved) : null;
   });
 
   useEffect(() => {
     const token = getAuthToken();
-    if (!token) {
-      // Set default demo token for seamless dev admin experience
-      const demoToken = 'DEMO-ADMIN-JWT-TOKEN';
-      setAuthToken(demoToken);
+    if (token) {
       setIsAuthenticated(true);
+    } else {
+      setIsAuthenticated(false);
     }
   }, []);
 

@@ -41,14 +41,36 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   // Auth
   login: (password: string) =>
-    request<{ token: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
+    request<{ access_token: string; token?: string; refresh_token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
       method: 'POST',
-      body: JSON.stringify({ email: 'admin@kresconet.com', password }),
+      body: JSON.stringify({ email: 'kresconet@gmail.com', password }),
+    }),
+
+  loginWithCredentials: (email: string, password: string) =>
+    request<{ access_token: string; token?: string; refresh_token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  // Products & Sample Catalogue
+  listProductsAdmin: () =>
+    request<any[]>('/catalogue/admin'),
+
+  createProduct: (p: any) =>
+    request<any>('/catalogue', {
+      method: 'POST',
+      body: JSON.stringify(p),
+    }),
+
+  updateProduct: (id: string, p: any) =>
+    request<any>(`/catalogue/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(p),
     }),
 
   // Applications
   listApplications: (status: string = 'all', limit = 50, offset = 0) =>
-    request<{ applications: any[]; total: number }>(`/admin/applications?status=${status}&limit=${limit}&offset=${offset}`),
+    request<{ applications: any[]; total: number }>(`/admin/applications?status=${status}&limit=${limit}&offset=${offset}`).catch(() => ({ applications: [], total: 0 })),
 
   getApplication: (id: string) =>
     request<any>(`/admin/applications/${id}`),
@@ -84,10 +106,10 @@ export const api = {
 
   // Distributors
   listDistributors: (limit = 50, offset = 0) =>
-    request<{ distributors: any[]; total: number }>(`/admin/distributors?limit=${limit}&offset=${offset}`),
+    request<any>(`/distributors?limit=${limit}&offset=${offset}`).then((res) => (Array.isArray(res) ? { distributors: res, total: res.length } : res)).catch(() => ({ distributors: [], total: 0 })),
 
   getDistributor: (id: string) =>
-    request<any>(`/admin/distributors/${id}`),
+    request<any>(`/distributors/${id}`),
 
   // Policy
   getPolicy: () =>

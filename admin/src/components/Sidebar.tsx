@@ -5,6 +5,7 @@ import {
   FileCheck, 
   Users, 
   ShoppingBag, 
+  Package,
   Sliders, 
   LogOut,
   Sparkles
@@ -18,6 +19,7 @@ export const Sidebar: React.FC = () => {
     { label: 'Dashboard', path: '/', icon: LayoutDashboard },
     { label: 'Applications', path: '/applications', icon: FileCheck, badge: 'Live' },
     { label: 'Distributors', path: '/distributors', icon: Users },
+    { label: 'Product Catalog', path: '/products', icon: Package },
     { label: 'Orders & Dispatch', path: '/orders', icon: ShoppingBag },
     { label: 'Credit Policy', path: '/policy', icon: Sliders },
   ];
