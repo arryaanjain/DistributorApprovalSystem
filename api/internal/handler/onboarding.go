@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/arryaanjain/DistributorApprovalSystem/internal/config"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/middleware"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/response"
 	svconboarding "github.com/arryaanjain/DistributorApprovalSystem/internal/service/onboarding"
@@ -12,10 +13,11 @@ import (
 // OnboardingHandler handles multi-step distributor onboarding.
 type OnboardingHandler struct {
 	svc *svconboarding.Service
+	cfg *config.Config
 }
 
-func NewOnboardingHandler(svc *svconboarding.Service) *OnboardingHandler {
-	return &OnboardingHandler{svc: svc}
+func NewOnboardingHandler(svc *svconboarding.Service, cfg *config.Config) *OnboardingHandler {
+	return &OnboardingHandler{svc: svc, cfg: cfg}
 }
 
 // POST /api/v1/onboarding/basic
@@ -197,4 +199,54 @@ func (h *OnboardingHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, status)
+}
+
+// POST /api/v1/onboarding/sample-order
+func (h *OnboardingHandler) CreateSampleOrder(w http.ResponseWriter, r *http.Request) {
+	distID := middleware.DistributorIDFromContext(r.Context())
+
+	var req svconboarding.CreateSampleOrderInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	keyID := "rzp_test_kresconet_key"
+	if h.cfg != nil && h.cfg.Razorpay.KeyID != "" {
+		keyID = h.cfg.Razorpay.KeyID
+	}
+
+	res, err := h.svc.CreateSampleOrder(r.Context(), distID, &req, keyID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	response.JSON(w, res)
+}
+
+// POST /api/v1/onboarding/sample-payment/verify
+func (h *OnboardingHandler) VerifySamplePayment(w http.ResponseWriter, r *http.Request) {
+	distID := middleware.DistributorIDFromContext(r.Context())
+
+	var req svconboarding.VerifySamplePaymentInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	keySecret := ""
+	if h.cfg != nil {
+		keySecret = h.cfg.Razorpay.KeySecret
+	}
+
+	if err := h.svc.VerifySamplePayment(r.Context(), distID, &req, keySecret); err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	response.JSON(w, map[string]string{
+		"message": "payment verified successfully, trial status activated",
+		"status":  "trial",
+	})
 }

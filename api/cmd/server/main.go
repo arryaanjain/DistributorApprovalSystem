@@ -84,7 +84,7 @@ func main() {
 	surepass  := svcver.NewSurepassClient(cfg.Surepass.BaseURL, cfg.Surepass.Token)
 	verSvc    := svcver.New(verRepo, distRepo, surepass)
 	creditSvc := svccredit.New(creditRepo, distRepo, verRepo)
-	onbSvc    := svconboarding.New(distRepo, verSvc, creditSvc)
+	onbSvc    := svconboarding.New(distRepo, orderRepo, verSvc, creditSvc)
 	agrSvc    := svcagr.New(creditRepo, distRepo, orderRepo, surepass)
 	orderSvc  := svcorder.New(orderRepo, creditRepo, distRepo)
 	finSvc    := svcfin.New(finRepo, orderRepo)
@@ -93,7 +93,7 @@ func main() {
 	handlers := &handler.Registry{
 		Health:        &handler.HealthHandler{},
 		Auth:          handler.NewAuthHandler(authSvc),
-		Onboarding:    handler.NewOnboardingHandler(onbSvc),
+		Onboarding:    handler.NewOnboardingHandler(onbSvc, cfg),
 		Distributor:   handler.NewDistributorHandler(distRepo),
 		Verification:  handler.NewVerificationHandler(verSvc),
 		Credit:        handler.NewCreditHandler(creditSvc),

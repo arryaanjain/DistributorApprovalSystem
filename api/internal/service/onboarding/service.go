@@ -5,9 +5,14 @@ package onboarding
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/apperrors"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/repository"
@@ -18,13 +23,15 @@ import (
 // Service orchestrates the onboarding multi-step flow.
 type Service struct {
 	distRepo  *repository.DistributorRepository
+	orderRepo *repository.OrderRepository
 	verSvc    *svcver.Service
 	creditSvc *svccredit.Service
 }
 
-func New(distRepo *repository.DistributorRepository, verSvc *svcver.Service, creditSvc *svccredit.Service) *Service {
+func New(distRepo *repository.DistributorRepository, orderRepo *repository.OrderRepository, verSvc *svcver.Service, creditSvc *svccredit.Service) *Service {
 	return &Service{
 		distRepo:  distRepo,
+		orderRepo: orderRepo,
 		verSvc:    verSvc,
 		creditSvc: creditSvc,
 	}
@@ -76,19 +83,22 @@ func (s *Service) SubmitBasic(ctx context.Context, distributorID string, in *Bas
 // ────────────────────────────────────────────────────────────────────────────
 
 type BusinessInput struct {
-	BusinessName               string   `json:"business_name"   validate:"required,min=2,max=200"`
-	Constitution               string   `json:"constitution"    validate:"required,oneof=proprietorship partnership llp private_limited public_limited huf trust other"`
-	AddressLine1               string   `json:"address_line1"   validate:"required"`
-	AddressLine2               string   `json:"address_line2"`
-	City                       string   `json:"city"            validate:"required"`
-	State                      string   `json:"state"           validate:"required"`
-	PIN                        string   `json:"pin"             validate:"required,len=6"`
-	VintageYears               float64  `json:"vintage_years"`
-	FMCGExperienceYears        float64  `json:"fmcg_experience_years"`
-	ApproxMonthlyBusinessINR   int64    `json:"approx_monthly_business_inr"`
-	RetailerCount              int      `json:"retailer_count"`
-	SalespersonCount           int      `json:"salesperson_count"`
-	ExistingBrands             []string `json:"existing_brands"`
+	BusinessName                      string   `json:"business_name"   validate:"required,min=2,max=200"`
+	Constitution                      string   `json:"constitution"    validate:"required,oneof=proprietorship partnership llp private_limited public_limited huf trust other"`
+	AddressLine1                      string   `json:"address_line1"   validate:"required"`
+	AddressLine2                      string   `json:"address_line2"`
+	City                              string   `json:"city"            validate:"required"`
+	State                             string   `json:"state"           validate:"required"`
+	PIN                               string   `json:"pin"             validate:"required,len=6"`
+	VintageYears                      float64  `json:"vintage_years"`
+	FMCGExperienceYears               float64  `json:"fmcg_experience_years"`
+	DistributionExperienceYears       float64  `json:"distribution_experience_years"`
+	ApproxMonthlyBusinessINR          int64    `json:"approx_monthly_business_inr"`
+	RetailerCount                     int      `json:"retailer_count"`
+	ServicedRetailersWholesalersCount int      `json:"serviced_retailers_wholesalers_count"`
+	SalespersonCount                  int      `json:"salesperson_count"`
+	InterestedBusinessRole             string   `json:"interested_business_role"`
+	ExistingBrands                    []string `json:"existing_brands"`
 }
 
 func (s *Service) SubmitBusiness(ctx context.Context, distributorID string, in *BusinessInput) error {
@@ -105,21 +115,34 @@ func (s *Service) SubmitBusiness(ctx context.Context, distributorID string, in *
 	// Convert INR → paise for storage
 	monthlyPaise := in.ApproxMonthlyBusinessINR * 100
 
+	distExp := in.DistributionExperienceYears
+	if distExp == 0 && in.FMCGExperienceYears > 0 {
+		distExp = in.FMCGExperienceYears
+	}
+
+	servicedCount := in.ServicedRetailersWholesalersCount
+	if servicedCount == 0 && in.RetailerCount > 0 {
+		servicedCount = in.RetailerCount
+	}
+
 	profile := &repository.BusinessProfileRecord{
-		DistributorID:              distributorID,
-		BusinessName:               in.BusinessName,
-		Constitution:               in.Constitution,
-		AddressLine1:               in.AddressLine1,
-		AddressLine2:               addrLine2,
-		City:                       in.City,
-		State:                      in.State,
-		PIN:                        in.PIN,
-		VintageYears:               nonZeroFloat64(in.VintageYears),
-		FMCGExperienceYears:        nonZeroFloat64(in.FMCGExperienceYears),
-		ApproxMonthlyBusinessPaise: nonZeroInt64(monthlyPaise),
-		RetailerCount:              nonZeroInt(in.RetailerCount),
-		SalespersonCount:           nonZeroInt(in.SalespersonCount),
-		ExistingBrands:             in.ExistingBrands,
+		DistributorID:                     distributorID,
+		BusinessName:                      in.BusinessName,
+		Constitution:                      in.Constitution,
+		AddressLine1:                      in.AddressLine1,
+		AddressLine2:                      addrLine2,
+		City:                              in.City,
+		State:                             in.State,
+		PIN:                               in.PIN,
+		VintageYears:                      nonZeroFloat64(in.VintageYears),
+		FMCGExperienceYears:               nonZeroFloat64(in.FMCGExperienceYears),
+		DistributionExperienceYears:       nonZeroFloat64(distExp),
+		ApproxMonthlyBusinessPaise:        nonZeroInt64(monthlyPaise),
+		RetailerCount:                     nonZeroInt(in.RetailerCount),
+		ServicedRetailersWholesalersCount: nonZeroInt(servicedCount),
+		SalespersonCount:                  nonZeroInt(in.SalespersonCount),
+		InterestedBusinessRole:             strPtrIfNotEmpty(in.InterestedBusinessRole),
+		ExistingBrands:                    in.ExistingBrands,
 	}
 
 	if err := s.distRepo.UpsertBusinessProfile(ctx, profile); err != nil {
@@ -210,9 +233,9 @@ func (s *Service) runStatutoryDuplicateCheck(ctx context.Context, distributorID,
 // ────────────────────────────────────────────────────────────────────────────
 
 type BankInput struct {
-	AccountNumber string `json:"account_number" validate:"required"`
-	IFSC          string `json:"ifsc"           validate:"required,len=11"`
-	AccountHolder string `json:"account_holder" validate:"required"`
+	AccountNumber string `json:"account_number"`
+	IFSC          string `json:"ifsc"`
+	AccountHolder string `json:"account_holder"`
 	BankName      string `json:"bank_name"`
 	Branch        string `json:"branch"`
 }
@@ -223,29 +246,32 @@ func (s *Service) SubmitBank(ctx context.Context, distributorID string, in *Bank
 		return nil, err
 	}
 
-	bank := &repository.BankDetailRecord{
-		DistributorID: distributorID,
-		AccountNumber: in.AccountNumber,
-		IFSC:          strings.ToUpper(in.IFSC),
-		AccountHolder: in.AccountHolder,
-		BankName:      strPtrIfNotEmpty(in.BankName),
-		Branch:        strPtrIfNotEmpty(in.Branch),
-	}
-
-	if err := s.distRepo.UpsertBankDetails(ctx, bank); err != nil {
-		return nil, apperrors.Internal("saving bank details", err)
-	}
-
-	// Duplicate check on bank account
 	result := &DuplicateCheckResult{}
-	if existingID, err := s.distRepo.FindByBankAccount(ctx, in.AccountNumber, strings.ToUpper(in.IFSC)); err == nil && existingID != nil && *existingID != distributorID {
-		result.SuspectFound = true
-		result.MatchedOn = []string{"bank_account"}
-		reason := "duplicate bank account detected"
-		_ = s.distRepo.MarkApplicationDuplicate(ctx, app.ID, reason)
+
+	// If bank details were provided, save them and run duplicate check
+	if strings.TrimSpace(in.AccountNumber) != "" && strings.TrimSpace(in.IFSC) != "" {
+		bank := &repository.BankDetailRecord{
+			DistributorID: distributorID,
+			AccountNumber: in.AccountNumber,
+			IFSC:          strings.ToUpper(in.IFSC),
+			AccountHolder: in.AccountHolder,
+			BankName:      strPtrIfNotEmpty(in.BankName),
+			Branch:        strPtrIfNotEmpty(in.Branch),
+		}
+
+		if err := s.distRepo.UpsertBankDetails(ctx, bank); err != nil {
+			return nil, apperrors.Internal("saving bank details", err)
+		}
+
+		if existingID, err := s.distRepo.FindByBankAccount(ctx, in.AccountNumber, strings.ToUpper(in.IFSC)); err == nil && existingID != nil && *existingID != distributorID {
+			result.SuspectFound = true
+			result.MatchedOn = []string{"bank_account"}
+			reason := "duplicate bank account detected"
+			_ = s.distRepo.MarkApplicationDuplicate(ctx, app.ID, reason)
+		}
 	}
 
-	reason := "bank details submitted"
+	reason := "bank details submitted (optional)"
 	_ = s.distRepo.UpdateApplicationStatus(ctx, app.ID, "bank_submitted", "distributor", &distributorID, &reason)
 
 	return result, nil
@@ -422,4 +448,84 @@ func nonZeroInt(v int) *int {
 		return nil
 	}
 	return &v
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Razorpay Sample Orders (Trial Flow)
+// ────────────────────────────────────────────────────────────────────────────
+
+type CreateSampleOrderInput struct {
+	AmountPaise int64                   `json:"amount_paise"`
+	Items       []repository.OrderItemRecord `json:"items"`
+}
+
+type SampleOrderResult struct {
+	SampleOrderID   string `json:"sample_order_id"`
+	RazorpayOrderID string `json:"razorpay_order_id"`
+	AmountPaise     int64  `json:"amount_paise"`
+	Currency        string `json:"currency"`
+	KeyID           string `json:"key_id"`
+}
+
+func (s *Service) CreateSampleOrder(ctx context.Context, distributorID string, in *CreateSampleOrderInput, rzpKeyID string) (*SampleOrderResult, error) {
+	app, err := s.requireActiveApplication(ctx, distributorID)
+	if err != nil {
+		return nil, err
+	}
+
+	amount := in.AmountPaise
+	if amount <= 0 {
+		amount = 50000 // Default ₹500
+	}
+
+	itemsJSONBytes, _ := json.Marshal(in.Items)
+	rzpOrderID := fmt.Sprintf("rzp_order_%d", time.Now().UnixNano())
+
+	sampleID, err := s.orderRepo.CreateSampleOrder(ctx, distributorID, rzpOrderID, amount, string(itemsJSONBytes))
+	if err != nil {
+		return nil, apperrors.Internal("creating sample order", err)
+	}
+
+	// Update app status to order_requirement or trial_pending
+	reason := "sample order initiated"
+	_ = s.distRepo.UpdateApplicationStatus(ctx, app.ID, "business_submitted", "distributor", &distributorID, &reason)
+
+	return &SampleOrderResult{
+		SampleOrderID:   sampleID,
+		RazorpayOrderID: rzpOrderID,
+		AmountPaise:     amount,
+		Currency:        "INR",
+		KeyID:           rzpKeyID,
+	}, nil
+}
+
+type VerifySamplePaymentInput struct {
+	RazorpayOrderID   string `json:"razorpay_order_id"`
+	RazorpayPaymentID string `json:"razorpay_payment_id"`
+	RazorpaySignature string `json:"razorpay_signature"`
+}
+
+func (s *Service) VerifySamplePayment(ctx context.Context, distributorID string, in *VerifySamplePaymentInput, keySecret string) error {
+	app, err := s.requireActiveApplication(ctx, distributorID)
+	if err != nil {
+		return err
+	}
+
+	// Verify HMAC-SHA256 signature if key secret is configured
+	if keySecret != "" && !strings.HasPrefix(keySecret, "rzp_test_") {
+		mac := hmac.New(sha256.New, []byte(keySecret))
+		mac.Write([]byte(in.RazorpayOrderID + "|" + in.RazorpayPaymentID))
+		expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+		if expectedSig != in.RazorpaySignature {
+			return apperrors.Validation("invalid razorpay payment signature")
+		}
+	}
+
+	if err := s.orderRepo.VerifySampleOrderPayment(ctx, in.RazorpayOrderID, in.RazorpayPaymentID, in.RazorpaySignature); err != nil {
+		return apperrors.Internal("verifying sample payment", err)
+	}
+
+	reason := "trial status activated via sample payment"
+	return s.distRepo.UpdateApplicationStatus(ctx, app.ID, "trial", "distributor", &distributorID, &reason)
 }

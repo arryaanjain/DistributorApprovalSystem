@@ -30,6 +30,28 @@ func (s *Service) ListCatalogue(ctx context.Context) ([]repository.ProductRecord
 	return s.orderRepo.ListProducts(ctx)
 }
 
+func (s *Service) ListSampleCatalogue(ctx context.Context) ([]repository.ProductRecord, error) {
+	return s.orderRepo.ListSampleProducts(ctx)
+}
+
+func (s *Service) ListAllProductsAdmin(ctx context.Context) ([]repository.ProductRecord, error) {
+	return s.orderRepo.ListAllProductsAdmin(ctx)
+}
+
+func (s *Service) CreateProduct(ctx context.Context, p *repository.ProductRecord) (string, error) {
+	if p.Name == "" || p.SKU == "" {
+		return "", apperrors.Validation("name and SKU are required")
+	}
+	return s.orderRepo.CreateProduct(ctx, p)
+}
+
+func (s *Service) UpdateProduct(ctx context.Context, p *repository.ProductRecord) error {
+	if p.ID == "" {
+		return apperrors.Validation("product ID is required")
+	}
+	return s.orderRepo.UpdateProduct(ctx, p)
+}
+
 func (s *Service) CreateOrder(ctx context.Context, distributorID string, items []CreateOrderItemInput) (*repository.OrderRecord, error) {
 	if len(items) == 0 {
 		return nil, apperrors.Validation("order must contain at least 1 item")
