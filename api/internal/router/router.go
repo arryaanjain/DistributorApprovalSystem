@@ -63,13 +63,15 @@ func New(deps *Dependencies) http.Handler {
 		// ── Onboarding (distributor-facing, requires distributor JWT) ─────────
 		r.Route("/onboarding", func(r chi.Router) {
 			r.Use(middleware.RequireDistributor(&deps.Cfg.JWT))
-			r.Post("/basic",      h.Onboarding.SubmitBasic)
-			r.Post("/business",   h.Onboarding.SubmitBusiness)
-			r.Post("/statutory",  h.Onboarding.SubmitStatutory)
-			r.Post("/bank",       h.Onboarding.SubmitBank)
-			r.Post("/preference", h.Onboarding.SubmitPreference)
-			r.Post("/consent",    h.Onboarding.SubmitConsent)
-			r.Get("/status",      h.Onboarding.GetStatus)
+			r.Post("/basic",                  h.Onboarding.SubmitBasic)
+			r.Post("/business",               h.Onboarding.SubmitBusiness)
+			r.Post("/statutory",              h.Onboarding.SubmitStatutory)
+			r.Post("/bank",                   h.Onboarding.SubmitBank)
+			r.Post("/preference",             h.Onboarding.SubmitPreference)
+			r.Post("/consent",                h.Onboarding.SubmitConsent)
+			r.Post("/sample-order",           h.Onboarding.CreateSampleOrder)
+			r.Post("/sample-payment/verify",  h.Onboarding.VerifySamplePayment)
+			r.Get("/status",                  h.Onboarding.GetStatus)
 		})
 
 		// ── Distributors ───────────────────────────────────────────────────────
@@ -146,16 +148,17 @@ func New(deps *Dependencies) http.Handler {
 
 		// ── Catalogue ──────────────────────────────────────────────────────────
 		r.Route("/catalogue", func(r chi.Router) {
-			// Distributors browse catalogue
+			// Distributors browse catalogue & sample products
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireDistributor(&deps.Cfg.JWT))
 				r.Get("/", h.Catalogue.List)
+				r.Get("/samples", h.Catalogue.ListSamples)
 				r.Get("/{id}", h.Catalogue.Get)
 			})
 			// Admin manages catalogue
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
-				r.Use(middleware.RequireRole("super_admin", "back_office"))
+				r.Get("/admin", h.Catalogue.ListAdmin)
 				r.Post("/", h.Catalogue.Create)
 				r.Put("/{id}", h.Catalogue.Update)
 				r.Delete("/{id}", h.Catalogue.Delete)
