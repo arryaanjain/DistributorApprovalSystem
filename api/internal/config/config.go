@@ -19,7 +19,20 @@ type Config struct {
 	Surepass SurepassConfig
 	MSG91    MSG91Config
 	Notify   NotifyConfig
+	Razorpay RazorpayConfig
+	Admin    AdminConfig
 	App      AppConfig
+}
+
+type AdminConfig struct {
+	Email    string `mapstructure:"ADMIN_EMAIL"`
+	Password string `mapstructure:"ADMIN_PASSWORD"`
+}
+
+type RazorpayConfig struct {
+	KeyID         string `mapstructure:"RAZORPAY_KEY_ID"`
+	KeySecret     string `mapstructure:"RAZORPAY_KEY_SECRET"`
+	WebhookSecret string `mapstructure:"RAZORPAY_WEBHOOK_SECRET"`
 }
 
 type ServerConfig struct {
@@ -178,6 +191,13 @@ func Load() (*Config, error) {
 	cfg.Notify.WAToken = v.GetString("WA_TOKEN")
 	cfg.Notify.WAPhoneID = v.GetString("WA_PHONE_ID")
 
+	cfg.Razorpay.KeyID = v.GetString("RAZORPAY_KEY_ID")
+	cfg.Razorpay.KeySecret = v.GetString("RAZORPAY_KEY_SECRET")
+	cfg.Razorpay.WebhookSecret = v.GetString("RAZORPAY_WEBHOOK_SECRET")
+
+	cfg.Admin.Email = v.GetString("ADMIN_EMAIL")
+	cfg.Admin.Password = v.GetString("ADMIN_PASSWORD")
+
 	cfg.App.Env = v.GetString("APP_ENV")
 	cfg.App.Name = v.GetString("APP_NAME")
 	cfg.App.DocumentBucket = v.GetString("DOCUMENT_BUCKET")
@@ -202,6 +222,12 @@ func (c *Config) validate() error {
 	}
 	if c.JWT.DistributorSecret == "" {
 		return fmt.Errorf("JWT_DISTRIBUTOR_SECRET is required")
+	}
+	if c.Admin.Email == "" {
+		return fmt.Errorf("ADMIN_EMAIL is required in environment configuration")
+	}
+	if c.Admin.Password == "" {
+		return fmt.Errorf("ADMIN_PASSWORD is required in environment configuration")
 	}
 	return nil
 }
