@@ -31,6 +31,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    if (res.status === 401 && !path.includes('/login')) {
+      clearAuthToken();
+      localStorage.removeItem('kresconet_admin_user');
+      window.location.href = '/';
+    }
     const errorMsg = body?.error?.message || body?.message || res.statusText || 'API Request Failed';
     throw new Error(errorMsg);
   }

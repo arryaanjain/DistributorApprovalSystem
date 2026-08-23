@@ -27,11 +27,6 @@ export const Applications: React.FC = () => {
     try {
       const data = await api.listApplications(statusFilter);
       setApplications(data.applications || []);
-      
-      const appParam = searchParams.get('id');
-      if (appParam) {
-        loadDetail(appParam);
-      }
     } catch (err) {
       console.error('Failed loading applications', err);
     } finally {
@@ -43,15 +38,27 @@ export const Applications: React.FC = () => {
     loadApplications();
   }, [statusFilter]);
 
+  useEffect(() => {
+    const appParam = searchParams.get('id');
+    if (appParam) {
+      loadDetail(appParam);
+    }
+  }, [searchParams]);
+
   const loadDetail = async (appId: string) => {
     setDetailLoading(true);
     setActionMessage('');
     try {
       const data = await api.getApplication(appId);
-      setAppDetail(data);
-      setSelectedApp(data.application);
-    } catch (err) {
+      if (data && data.application) {
+        setAppDetail(data);
+        setSelectedApp(data.application);
+      } else {
+        setActionMessage(`Application #${appId} not found or details empty.`);
+      }
+    } catch (err: any) {
       console.error('Failed fetching application detail', err);
+      setActionMessage(`Could not load application detail: ${err.message || 'Unknown error'}`);
     } finally {
       setDetailLoading(false);
     }
@@ -103,13 +110,15 @@ export const Applications: React.FC = () => {
   };
 
   const handleTriggerAllVerifications = async () => {
-    if (!appDetail?.application) return;
+    const appId = appDetail?.application?.id || selectedApp?.id;
+    const distId = appDetail?.application?.distributor_id || selectedApp?.distributor_id;
+    if (!appId || !distId) return;
     setActionLoading(true);
     try {
-      await api.triggerVerifications(appDetail.application.id, appDetail.application.distributor_id);
-      await api.evaluateCredit(appDetail.application.id);
+      await api.triggerVerifications(appId, distId);
+      await api.evaluateCredit(appId);
       setActionMessage('Verifications & Credit Evaluation triggered successfully!');
-      loadDetail(appDetail.application.id);
+      loadDetail(appId);
     } catch (err: any) {
       setActionMessage(`Verification trigger: ${err.message}`);
     } finally {
@@ -204,7 +213,9 @@ export const Applications: React.FC = () => {
           <div className="lg:col-span-7 glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div>
-                <span className="text-xs font-mono text-indigo-400 uppercase tracking-widest">APP #{appDetail.application.id.slice(0, 8)}</span>
+                <span className="text-xs font-mono text-indigo-400 uppercase tracking-widest">
+                  APP #{appDetail.application?.id ? appDetail.application.id.slice(0, 8) : (selectedApp?.id ? selectedApp.id.slice(0, 8) : 'N/A')}
+                </span>
                 <h2 className="text-xl font-black text-white mt-0.5">{appDetail.profile?.business_name || appDetail.distributor?.name || 'Distributor Profile'}</h2>
               </div>
               <div className="flex items-center gap-2">
