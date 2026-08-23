@@ -34,9 +34,12 @@ type BusinessProfileRecord struct {
 	PIN                         string
 	VintageYears                *float64
 	FMCGExperienceYears         *float64
+	DistributionExperienceYears *float64
 	ApproxMonthlyBusinessPaise  *int64
 	RetailerCount               *int
+	ServicedRetailersWholesalersCount *int
 	SalespersonCount            *int
+	InterestedBusinessRole      *string
 	ExistingBrands              []string
 }
 
@@ -219,9 +222,10 @@ func (r *DistributorRepository) UpsertBusinessProfile(ctx context.Context, p *Bu
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO business_profiles
 		 (distributor_id, business_name, constitution, address_line1, address_line2,
-		  city, state, pin, vintage_years, fmcg_experience_years,
-		  approx_monthly_business_paise, retailer_count, salesperson_count, existing_brands)
-		 VALUES ($1,$2,$3::constitution_type,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		  city, state, pin, vintage_years, fmcg_experience_years, distribution_experience_years,
+		  approx_monthly_business_paise, retailer_count, serviced_retailers_wholesalers_count,
+		  salesperson_count, interested_business_role, existing_brands)
+		 VALUES ($1,$2,$3::constitution_type,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		 ON CONFLICT (distributor_id) DO UPDATE SET
 		  business_name = EXCLUDED.business_name,
 		  constitution = EXCLUDED.constitution,
@@ -230,14 +234,18 @@ func (r *DistributorRepository) UpsertBusinessProfile(ctx context.Context, p *Bu
 		  city = EXCLUDED.city, state = EXCLUDED.state, pin = EXCLUDED.pin,
 		  vintage_years = EXCLUDED.vintage_years,
 		  fmcg_experience_years = EXCLUDED.fmcg_experience_years,
+		  distribution_experience_years = EXCLUDED.distribution_experience_years,
 		  approx_monthly_business_paise = EXCLUDED.approx_monthly_business_paise,
 		  retailer_count = EXCLUDED.retailer_count,
+		  serviced_retailers_wholesalers_count = EXCLUDED.serviced_retailers_wholesalers_count,
 		  salesperson_count = EXCLUDED.salesperson_count,
+		  interested_business_role = EXCLUDED.interested_business_role,
 		  existing_brands = EXCLUDED.existing_brands,
 		  updated_at = NOW()`,
 		p.DistributorID, p.BusinessName, p.Constitution, p.AddressLine1, p.AddressLine2,
-		p.City, p.State, p.PIN, p.VintageYears, p.FMCGExperienceYears,
-		p.ApproxMonthlyBusinessPaise, p.RetailerCount, p.SalespersonCount, p.ExistingBrands,
+		p.City, p.State, p.PIN, p.VintageYears, p.FMCGExperienceYears, p.DistributionExperienceYears,
+		p.ApproxMonthlyBusinessPaise, p.RetailerCount, p.ServicedRetailersWholesalersCount,
+		p.SalespersonCount, p.InterestedBusinessRole, p.ExistingBrands,
 	)
 	return err
 }
@@ -245,14 +253,16 @@ func (r *DistributorRepository) UpsertBusinessProfile(ctx context.Context, p *Bu
 func (r *DistributorRepository) GetBusinessProfile(ctx context.Context, distributorID string) (*BusinessProfileRecord, error) {
 	row := r.db.QueryRow(ctx,
 		`SELECT id, distributor_id, business_name, constitution::TEXT, address_line1, address_line2,
-		        city, state, pin, vintage_years, fmcg_experience_years,
-		        approx_monthly_business_paise, retailer_count, salesperson_count, existing_brands
+		        city, state, pin, vintage_years, fmcg_experience_years, distribution_experience_years,
+		        approx_monthly_business_paise, retailer_count, serviced_retailers_wholesalers_count,
+		        salesperson_count, interested_business_role, existing_brands
 		 FROM business_profiles WHERE distributor_id = $1`, distributorID)
 	bp := &BusinessProfileRecord{}
 	err := row.Scan(&bp.ID, &bp.DistributorID, &bp.BusinessName, &bp.Constitution,
 		&bp.AddressLine1, &bp.AddressLine2, &bp.City, &bp.State, &bp.PIN,
-		&bp.VintageYears, &bp.FMCGExperienceYears, &bp.ApproxMonthlyBusinessPaise,
-		&bp.RetailerCount, &bp.SalespersonCount, &bp.ExistingBrands)
+		&bp.VintageYears, &bp.FMCGExperienceYears, &bp.DistributionExperienceYears,
+		&bp.ApproxMonthlyBusinessPaise, &bp.RetailerCount, &bp.ServicedRetailersWholesalersCount,
+		&bp.SalespersonCount, &bp.InterestedBusinessRole, &bp.ExistingBrands)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

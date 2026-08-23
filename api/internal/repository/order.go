@@ -18,7 +18,21 @@ type ProductRecord struct {
 	PricePaise  int64     `json:"price_paise"`
 	Moq         int       `json:"moq"`
 	IsActive    bool      `json:"is_active"`
+	IsSample    bool      `json:"is_sample"`
+	IsRegular   bool      `json:"is_regular"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type SampleOrderRecord struct {
+	ID                string     `json:"id"`
+	DistributorID     string     `json:"distributor_id"`
+	RazorpayOrderID   string     `json:"razorpay_order_id"`
+	RazorpayPaymentID *string    `json:"razorpay_payment_id"`
+	RazorpaySignature *string    `json:"razorpay_signature"`
+	AmountPaise       int64      `json:"amount_paise"`
+	Status            string     `json:"status"`
+	ItemsJSON         *string    `json:"items_json"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 type OrderRecord struct {
@@ -70,7 +84,7 @@ func NewOrderRepository(db *pgxpool.Pool) *OrderRepository {
 
 func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, created_at
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
 		 FROM products WHERE is_active = TRUE ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
@@ -80,7 +94,7 @@ func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, er
 	var list []ProductRecord
 	for rows.Next() {
 		p := ProductRecord{}
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -88,12 +102,73 @@ func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, er
 	return list, nil
 }
 
+func (r *OrderRepository) ListSampleProducts(ctx context.Context) ([]ProductRecord, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
+		 FROM products WHERE is_active = TRUE AND is_sample = TRUE ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []ProductRecord
+	for rows.Next() {
+		p := ProductRecord{}
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	return list, nil
+}
+
+func (r *OrderRepository) ListAllProductsAdmin(ctx context.Context) ([]ProductRecord, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
+		 FROM products ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []ProductRecord
+	for rows.Next() {
+		p := ProductRecord{}
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	return list, nil
+}
+
+func (r *OrderRepository) CreateProduct(ctx context.Context, p *ProductRecord) (string, error) {
+	var id string
+	err := r.db.QueryRow(ctx,
+		`INSERT INTO products (sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+		p.SKU, p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *OrderRepository) UpdateProduct(ctx context.Context, p *ProductRecord) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE products
+		 SET name = $1, description = $2, category = $3, price_paise = $4, moq = $5,
+		     is_active = $6, is_sample = $7, is_regular = $8
+		 WHERE id = $9`,
+		p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular, p.ID,
+	)
+	return err
+}
+
 func (r *OrderRepository) GetProductByID(ctx context.Context, id string) (*ProductRecord, error) {
 	row := r.db.QueryRow(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, created_at
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
 		 FROM products WHERE id = $1`, id)
 	p := &ProductRecord{}
-	err := row.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -312,4 +387,49 @@ func (r *OrderRepository) ListOrdersForReview(ctx context.Context) ([]OrderRecor
 		list = append(list, o)
 	}
 	return list, nil
+}
+
+// ──────────────────────────────── Sample Orders (Razorpay) ───────────────────
+
+func (r *OrderRepository) CreateSampleOrder(ctx context.Context, distributorID, rzpOrderID string, amountPaise int64, itemsJSON string) (string, error) {
+	var id string
+	err := r.db.QueryRow(ctx,
+		`INSERT INTO sample_orders (distributor_id, razorpay_order_id, amount_paise, status, items)
+		 VALUES ($1, $2, $3, 'CREATED', $4::jsonb) RETURNING id`,
+		distributorID, rzpOrderID, amountPaise, itemsJSON,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *OrderRepository) VerifySampleOrderPayment(ctx context.Context, rzpOrderID, rzpPaymentID, rzpSignature string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var distID string
+	err = tx.QueryRow(ctx,
+		`UPDATE sample_orders
+		 SET razorpay_payment_id = $1, razorpay_signature = $2, status = 'PAID', updated_at = NOW()
+		 WHERE razorpay_order_id = $3
+		 RETURNING distributor_id`,
+		rzpPaymentID, rzpSignature, rzpOrderID,
+	).Scan(&distID)
+	if err != nil {
+		return err
+	}
+
+	// Update active application status to 'trial'
+	_, err = tx.Exec(ctx,
+		`UPDATE applications
+		 SET status = 'trial'::application_status, updated_at = NOW()
+		 WHERE distributor_id = $1 AND status NOT IN ('rejected', 'blocked')`,
+		distID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
