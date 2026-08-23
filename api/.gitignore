@@ -4,6 +4,7 @@
 # Compiled binaries (adjust app name if desired)
 /bin/
 /dist/
+/tmp/
 *.exe
 *.exe~
 *.dll
