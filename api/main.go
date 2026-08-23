@@ -1,7 +1,7 @@
+// This file is the legacy root main.go — the real entry point is cmd/server/main.go
+// Run the server with: go run ./cmd/server
 package main
 
-import "fmt"
-
 func main() {
-    fmt.Println("Hello, World!")
+	panic("run the server with: go run ./cmd/server")
 }
