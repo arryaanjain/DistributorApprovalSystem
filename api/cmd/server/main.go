@@ -81,7 +81,7 @@ func main() {
 	// ── Services ───────────────────────────────────────────────────────────
 	msg91     := svcauth.NewMSG91Client(&cfg.MSG91)
 	authSvc   := svcauth.New(cfg, otpRepo, userRepo, distRepo, msg91)
-	surepass  := svcver.NewSurepassClient(cfg.Surepass.BaseURL, cfg.Surepass.Token)
+	surepass  := svcver.NewSurepassClient(cfg.Surepass.BaseURL, cfg.Surepass.CIBILBaseURL, cfg.Surepass.Token, cfg.Surepass.CIBILToken)
 	verSvc    := svcver.New(verRepo, distRepo, surepass)
 	creditSvc := svccredit.New(creditRepo, distRepo, verRepo)
 	onbSvc    := svconboarding.New(distRepo, orderRepo, verSvc, creditSvc)

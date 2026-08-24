@@ -74,8 +74,10 @@ type RedisConfig struct {
 }
 
 type SurepassConfig struct {
-	BaseURL string `mapstructure:"SUREPASS_BASE_URL"`
-	Token   string `mapstructure:"SUREPASS_TOKEN"`
+	BaseURL      string `mapstructure:"SUREPASS_BASE_URL"`
+	CIBILBaseURL string `mapstructure:"SUREPASS_CIBIL_BASE_URL"`
+	Token        string `mapstructure:"SUREPASS_TOKEN"`
+	CIBILToken   string `mapstructure:"SUREPASS_CIBIL_TOKEN"`
 }
 
 type MSG91Config struct {
@@ -135,6 +137,7 @@ func Load() (*Config, error) {
 	v.SetDefault("NOTIFY_WHATSAPP", false)
 	v.SetDefault("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 	v.SetDefault("SUREPASS_BASE_URL", "https://kyc-api.surepass.io/api/v1")
+	v.SetDefault("SUREPASS_CIBIL_BASE_URL", "https://app.surepass.app/production/api/v1")
 
 	// Load .env file if present (non-fatal if missing)
 	v.SetConfigFile(".env")
@@ -174,6 +177,7 @@ func Load() (*Config, error) {
 	cfg.Redis.DB = v.GetInt("REDIS_DB")
 
 	cfg.Surepass.BaseURL = v.GetString("SUREPASS_BASE_URL")
+	cfg.Surepass.CIBILBaseURL = v.GetString("SUREPASS_CIBIL_BASE_URL")
 	cfg.Surepass.Token = v.GetString("SUREPASS_TOKEN")
 
 	cfg.MSG91.AuthKey = v.GetString("MSG91_AUTH_KEY")
