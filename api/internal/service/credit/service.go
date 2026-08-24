@@ -5,6 +5,7 @@ package credit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/engine"
@@ -40,19 +41,19 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 
 	distID := app.DistributorID
 
-	bp, err := s.distRepo.GetBusinessProfile(ctx, distID)
-	if err != nil {
-		return nil, apperrors.Internal("fetching business profile", err)
+	bp, bpErr := s.distRepo.GetBusinessProfile(ctx, distID)
+	if bpErr != nil {
+		slog.Warn("fetching business profile failed during credit eval", "distributor_id", distID, "error", bpErr)
 	}
 
-	docs, err := s.distRepo.GetBusinessDocuments(ctx, distID)
-	if err != nil {
-		return nil, apperrors.Internal("fetching business documents", err)
+	docs, docErr := s.distRepo.GetBusinessDocuments(ctx, distID)
+	if docErr != nil {
+		slog.Warn("fetching business documents failed during credit eval", "distributor_id", distID, "error", docErr)
 	}
 
-	vers, err := s.verRepo.GetAllForApplication(ctx, distID)
-	if err != nil {
-		return nil, apperrors.Internal("fetching verifications", err)
+	vers, verErr := s.verRepo.GetAllForApplication(ctx, distID)
+	if verErr != nil {
+		slog.Warn("fetching verifications failed during credit eval", "distributor_id", distID, "error", verErr)
 	}
 
 	// 1. Calculate Score
@@ -62,14 +63,15 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 	riskEval := engine.EvaluateHardRisk(app, docs, vers)
 
 	// Save score & components
-	if _, err := s.creditRepo.SaveScore(ctx, distID, appID, scoreResult.TotalScore, scoreResult.RiskGrade, scoreResult.Components); err != nil {
-		return nil, apperrors.Internal("saving score", err)
+	scoreID, err := s.creditRepo.SaveScore(ctx, distID, appID, scoreResult.TotalScore, scoreResult.RiskGrade, scoreResult.Components)
+	if err != nil {
+		slog.Error("saving score failed", "error", err, "distributor_id", distID)
 	}
 
 	// Save risk flags
 	if len(riskEval.RiskFlags) > 0 {
 		if err := s.creditRepo.SaveRiskFlags(ctx, distID, appID, riskEval.RiskFlags); err != nil {
-			return nil, apperrors.Internal("saving risk flags", err)
+			slog.Error("saving risk flags failed", "error", err, "distributor_id", distID)
 		}
 	}
 
@@ -80,9 +82,15 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 	}
 	decOutput := engine.ComputeDecision(scoreResult, riskEval, docs, pref)
 
+	var scoreIDPtr *string
+	if scoreID != "" {
+		scoreIDPtr = &scoreID
+	}
+
 	decisionRecord := &repository.CreditDecisionRecord{
 		ApplicationID:      appID,
 		DistributorID:      distID,
+		CreditScoreID:      scoreIDPtr,
 		TotalScore:         scoreResult.TotalScore,
 		RiskGrade:          scoreResult.RiskGrade,
 		Decision:           decOutput.Decision,
@@ -104,19 +112,22 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 	// Create Offer
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	offer := &repository.CreditOfferRecord{
+		ApplicationID:     appID,
 		DecisionID:        decID,
 		DistributorID:     distID,
+		RiskGrade:         scoreResult.RiskGrade,
 		OfferedLimitPaise: decOutput.ApprovedLimitPaise,
 		OfferedPeriodDays: decOutput.ApprovedPeriodDays,
+		MaxOutstandingAge: decOutput.MaxOutstandingAge,
 		PaymentTerms:      decOutput.PaymentTerms,
 		ExpiresAt:         expiresAt,
 	}
 	if _, err := s.creditRepo.CreateOffer(ctx, offer); err != nil {
-		return nil, apperrors.Internal("creating credit offer", err)
+		slog.Error("creating credit offer failed", "error", err, "distributor_id", distID)
 	}
 
 	// Update application status
-	newStatus := "approved"
+	newStatus := "offer_generated"
 	if decOutput.Decision == "ADVANCE_ONLY" {
 		newStatus = "advance_only"
 	}

@@ -11,52 +11,56 @@ import (
 
 // CreditDecisionRecord represents a row in credit_decisions.
 type CreditDecisionRecord struct {
-	ID                 string
-	ApplicationID      string
-	DistributorID      string
-	PolicyVersionID    *string
-	TotalScore         int
-	RiskGrade          string
-	Decision           string // APPROVED, ADVANCE_ONLY, MANUAL_REVIEW, REJECTED
-	ApprovedLimitPaise int64
-	ApprovedPeriodDays int
-	MaxOutstandingAge  int
-	PaymentTerms       string
-	NonGSTCapped       bool
-	HardRiskTriggered  bool
-	DecidedBy          string // SYSTEM or user_id
-	DecidedAt          time.Time
+	ID                 string    `json:"id"`
+	ApplicationID      string    `json:"application_id"`
+	DistributorID      string    `json:"distributor_id"`
+	CreditScoreID      *string   `json:"credit_score_id,omitempty"`
+	PolicyVersion      string    `json:"policy_version"`
+	TotalScore         int       `json:"total_score"`
+	RiskGrade          string    `json:"risk_grade"`
+	Decision           string    `json:"decision"`
+	ApprovedLimitPaise int64     `json:"approved_limit_paise"`
+	ApprovedPeriodDays int       `json:"approved_period_days"`
+	MaxOutstandingAge  int       `json:"max_outstanding_age"`
+	PaymentTerms       string    `json:"payment_terms"`
+	NonGSTCapped       bool      `json:"non_gst_capped"`
+	HardRiskTriggered  bool      `json:"hard_risk_triggered"`
+	DecidedBy          string    `json:"decided_by"`
+	DecidedAt          time.Time `json:"decided_at"`
 }
 
 // CreditOfferRecord represents a row in credit_offers.
 type CreditOfferRecord struct {
-	ID                 string
-	DecisionID         string
-	DistributorID      string
-	OfferedLimitPaise  int64
-	OfferedPeriodDays  int
-	PaymentTerms       string
-	Status             string // PENDING, ACCEPTED, DECLINED, EXPIRED
-	AcceptedAt         *time.Time
-	DeclinedAt         *time.Time
-	ExpiresAt          time.Time
-	CreatedAt          time.Time
+	ID                 string     `json:"id"`
+	ApplicationID      string     `json:"application_id"`
+	DecisionID         string     `json:"decision_id"`
+	DistributorID      string     `json:"distributor_id"`
+	RiskGrade          string     `json:"risk_grade"`
+	OfferedLimitPaise  int64      `json:"offered_limit_paise"`
+	OfferedPeriodDays  int        `json:"offered_period_days"`
+	MaxOutstandingAge  int        `json:"max_outstanding_age"`
+	PaymentTerms       string     `json:"payment_terms"`
+	Status             string     `json:"status"`
+	AcceptedAt         *time.Time `json:"accepted_at,omitempty"`
+	DeclinedAt         *time.Time `json:"declined_at,omitempty"`
+	ExpiresAt          time.Time  `json:"expires_at"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 // AgreementRecord represents a row in distributor_agreements.
 type AgreementRecord struct {
-	ID                  string
-	DistributorID       string
-	ApplicationID       string
-	AgreementNumber     string
-	Version             string
-	ApprovedLimitPaise  int64
-	ApprovedPeriodDays  int
-	Status              string // DRAFT, GENERATED, SENT_FOR_SIGNATURE, SIGNED, EXPIRED
-	DocumentURL         *string
-	SignedAt            *time.Time
-	EsignProviderRef    *string
-	CreatedAt           time.Time
+	ID                 string     `json:"id"`
+	DistributorID      string     `json:"distributor_id"`
+	ApplicationID      string     `json:"application_id"`
+	AgreementNumber    string     `json:"agreement_number"`
+	Version            string     `json:"version"`
+	ApprovedLimitPaise int64      `json:"approved_limit_paise"`
+	ApprovedPeriodDays int        `json:"approved_period_days"`
+	Status             string     `json:"status"`
+	DocumentURL        *string    `json:"document_url,omitempty"`
+	SignedAt           *time.Time `json:"signed_at,omitempty"`
+	EsignProviderRef   *string    `json:"esign_provider_ref,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 type CreditRepository struct {
@@ -75,11 +79,16 @@ func (r *CreditRepository) SaveScore(ctx context.Context, distributorID, appID s
 	}
 	defer tx.Rollback(ctx)
 
+	rg := riskGrade
+	if rg != "A" && rg != "B" && rg != "C" && rg != "D" && rg != "E" {
+		rg = "A"
+	}
+
 	var scoreID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO credit_scores (distributor_id, application_id, total_score, risk_grade)
-		 VALUES ($1, $2, $3, $4) RETURNING id`,
-		distributorID, appID, totalScore, riskGrade,
+		`INSERT INTO credit_scores (distributor_id, application_id, policy_version, total_score, risk_grade, inputs)
+		 VALUES ($1, $2, 'v1.0', $3, $4::risk_grade, '{}'::jsonb) RETURNING id`,
+		distributorID, appID, totalScore, rg,
 	).Scan(&scoreID)
 	if err != nil {
 		return "", err
@@ -87,7 +96,7 @@ func (r *CreditRepository) SaveScore(ctx context.Context, distributorID, appID s
 
 	for param, val := range components {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO credit_score_components (credit_score_id, parameter_name, weight, score_earned)
+			`INSERT INTO credit_score_components (credit_score_id, component_name, weight, weighted_score)
 			 VALUES ($1, $2, 0, $3)`,
 			scoreID, param, val,
 		)
@@ -103,9 +112,8 @@ func (r *CreditRepository) SaveScore(ctx context.Context, distributorID, appID s
 func (r *CreditRepository) SaveRiskFlags(ctx context.Context, distributorID, appID string, flags []string) error {
 	for _, flag := range flags {
 		_, err := r.db.Exec(ctx,
-			`INSERT INTO risk_flags (distributor_id, application_id, flag_code, severity, description)
-			 VALUES ($1, $2, $3, 'CRITICAL', 'Hard risk rule triggered')
-			 ON CONFLICT DO NOTHING`,
+			`INSERT INTO risk_flags (distributor_id, application_id, flag_code, flag_description, severity, triggered_by)
+			 VALUES ($1, $2, $3, 'Hard risk rule triggered', 'hard', 'system')`,
 			distributorID, appID, flag,
 		)
 		if err != nil {
@@ -115,37 +123,59 @@ func (r *CreditRepository) SaveRiskFlags(ctx context.Context, distributorID, app
 	return nil
 }
 
-// SaveDecision inserts a formal credit decision.
+// SaveDecision inserts a formal credit decision matching PostgreSQL schema.
 func (r *CreditRepository) SaveDecision(ctx context.Context, d *CreditDecisionRecord) (string, error) {
+	eligibility := "credit"
+	if d.Decision == "ADVANCE_ONLY" {
+		eligibility = "advance_only"
+	} else if d.Decision == "REFER_MANUAL" {
+		eligibility = "hold"
+	} else if d.Decision == "REJECT" {
+		eligibility = "blocked"
+	}
+
+	approvedPeriod := "15_days"
+	if d.ApprovedPeriodDays == 30 {
+		approvedPeriod = "30_days"
+	} else if d.ApprovedPeriodDays == 0 {
+		approvedPeriod = "cod"
+	}
+
 	var id string
 	err := r.db.QueryRow(ctx,
 		`INSERT INTO credit_decisions
-		 (application_id, distributor_id, policy_version_id, total_score, risk_grade,
-		  decision, approved_limit_paise, approved_period_days, max_outstanding_age,
-		  payment_terms, non_gst_capped, hard_risk_triggered, decided_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		 (application_id, distributor_id, credit_score_id, policy_version, eligibility,
+		  approved_limit_paise, approved_period, max_outstanding_days, hard_flags_present, decision_source)
+		 VALUES ($1, $2, $3, 'v1.0', $4::eligibility_decision, $5, $6::credit_period_code, $7, $8, 'auto')
 		 RETURNING id`,
-		d.ApplicationID, d.DistributorID, d.PolicyVersionID, d.TotalScore, d.RiskGrade,
-		d.Decision, d.ApprovedLimitPaise, d.ApprovedPeriodDays, d.MaxOutstandingAge,
-		d.PaymentTerms, d.NonGSTCapped, d.HardRiskTriggered, d.DecidedBy,
+		d.ApplicationID, d.DistributorID, d.CreditScoreID, eligibility,
+		d.ApprovedLimitPaise, approvedPeriod, d.MaxOutstandingAge, d.HardRiskTriggered,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *CreditRepository) GetDecisionByAppID(ctx context.Context, appID string) (*CreditDecisionRecord, error) {
 	row := r.db.QueryRow(ctx,
-		`SELECT id, application_id, distributor_id, policy_version_id, total_score, risk_grade,
-		        decision, approved_limit_paise, approved_period_days, max_outstanding_age,
-		        payment_terms, non_gst_capped, hard_risk_triggered, decided_by, decided_at
-		 FROM credit_decisions WHERE application_id = $1 ORDER BY decided_at DESC LIMIT 1`, appID)
+		`SELECT d.id, d.application_id, d.distributor_id, d.credit_score_id, d.policy_version, d.eligibility,
+		        d.approved_limit_paise, d.approved_period, d.max_outstanding_days, d.hard_flags_present, d.decided_at,
+		        COALESCE(s.total_score, 0), COALESCE(s.risk_grade::TEXT, '')
+		 FROM credit_decisions d
+		 LEFT JOIN credit_scores s ON d.credit_score_id = s.id
+		 WHERE d.application_id = $1 ORDER BY d.decided_at DESC LIMIT 1`, appID)
 	d := &CreditDecisionRecord{}
-	err := row.Scan(&d.ID, &d.ApplicationID, &d.DistributorID, &d.PolicyVersionID,
-		&d.TotalScore, &d.RiskGrade, &d.Decision, &d.ApprovedLimitPaise, &d.ApprovedPeriodDays,
-		&d.MaxOutstandingAge, &d.PaymentTerms, &d.NonGSTCapped, &d.HardRiskTriggered,
-		&d.DecidedBy, &d.DecidedAt)
+	var eligibilityStr, periodStr string
+	err := row.Scan(&d.ID, &d.ApplicationID, &d.DistributorID, &d.CreditScoreID, &d.PolicyVersion,
+		&eligibilityStr, &d.ApprovedLimitPaise, &periodStr,
+		&d.MaxOutstandingAge, &d.HardRiskTriggered, &d.DecidedAt,
+		&d.TotalScore, &d.RiskGrade)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	d.Decision = eligibilityStr
+	d.PaymentTerms = periodStr
 	return d, err
 }
 
@@ -153,28 +183,45 @@ func (r *CreditRepository) GetDecisionByAppID(ctx context.Context, appID string)
 
 func (r *CreditRepository) CreateOffer(ctx context.Context, o *CreditOfferRecord) (string, error) {
 	var id string
+	riskGrade := o.RiskGrade
+	if riskGrade != "A" && riskGrade != "B" && riskGrade != "C" && riskGrade != "D" && riskGrade != "E" {
+		riskGrade = "A"
+	}
+	periodCode := "15_days"
+	if o.OfferedPeriodDays == 30 {
+		periodCode = "30_days"
+	} else if o.OfferedPeriodDays == 0 {
+		periodCode = "cod"
+	}
+
 	err := r.db.QueryRow(ctx,
 		`INSERT INTO credit_offers
-		 (decision_id, distributor_id, offered_limit_paise, offered_period_days, payment_terms, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		o.DecisionID, o.DistributorID, o.OfferedLimitPaise, o.OfferedPeriodDays, o.PaymentTerms, o.ExpiresAt,
+		 (application_id, distributor_id, credit_decision_id, risk_grade, offered_limit_paise, offered_period, max_outstanding_days, expires_at)
+		 VALUES ($1, $2, $3, $4::risk_grade, $5, $6::credit_period_code, $7, $8) RETURNING id`,
+		o.ApplicationID, o.DistributorID, o.DecisionID, riskGrade, o.OfferedLimitPaise, periodCode, o.MaxOutstandingAge, o.ExpiresAt,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *CreditRepository) GetActiveOfferByDistributor(ctx context.Context, distributorID string) (*CreditOfferRecord, error) {
 	row := r.db.QueryRow(ctx,
-		`SELECT id, decision_id, distributor_id, offered_limit_paise, offered_period_days,
-		        payment_terms, status, accepted_at, declined_at, expires_at, created_at
+		`SELECT id, credit_decision_id, distributor_id, risk_grade, offered_limit_paise,
+		        offered_period, decision, accepted_at, declined_at, expires_at, created_at
 		 FROM credit_offers WHERE distributor_id = $1 ORDER BY created_at DESC LIMIT 1`, distributorID)
 	o := &CreditOfferRecord{}
-	err := row.Scan(&o.ID, &o.DecisionID, &o.DistributorID, &o.OfferedLimitPaise,
-		&o.OfferedPeriodDays, &o.PaymentTerms, &o.Status, &o.AcceptedAt, &o.DeclinedAt,
+	var riskGradeStr, periodStr string
+	err := row.Scan(&o.ID, &o.DecisionID, &o.DistributorID, &riskGradeStr, &o.OfferedLimitPaise,
+		&periodStr, &o.Status, &o.AcceptedAt, &o.DeclinedAt,
 		&o.ExpiresAt, &o.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
-	return o, err
+	if err != nil {
+		return nil, err
+	}
+	o.RiskGrade = riskGradeStr
+	o.PaymentTerms = periodStr
+	return o, nil
 }
 
 func (r *CreditRepository) UpdateOfferStatus(ctx context.Context, offerID, status string) error {
