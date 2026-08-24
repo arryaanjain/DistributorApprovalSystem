@@ -122,11 +122,21 @@ func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request
 	}
 
 	// 2. Evaluate credit decision & generate offer
+	var decRecord *repository.CreditDecisionRecord
 	if h.creditSvc != nil {
-		_, _ = h.creditSvc.EvaluateApplication(r.Context(), app.ID)
+		decRecord, _ = h.creditSvc.EvaluateApplication(r.Context(), app.ID)
 	}
 
-	// 3. Mark application approved
+	// 3. Mark application status based on credit decision
+	targetStatus := "offer_generated"
+	if decRecord != nil {
+		if decRecord.Decision == "ADVANCE_ONLY" {
+			targetStatus = "advance_only"
+		} else if decRecord.Decision == "REJECT" {
+			targetStatus = "rejected"
+		}
+	}
+
 	reason := "Approved by employee"
 	if input.Reason != "" {
 		reason = input.Reason
@@ -137,15 +147,15 @@ func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request
 		actorID = &userID
 	}
 
-	if err := h.distRepo.UpdateApplicationStatus(r.Context(), app.ID, "approved", "employee", actorID, &reason); err != nil {
+	if err := h.distRepo.UpdateApplicationStatus(r.Context(), app.ID, targetStatus, "employee", actorID, &reason); err != nil {
 		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 
 	response.JSON(w, map[string]interface{}{
-		"status":         "approved",
+		"status":         targetStatus,
 		"application_id": app.ID,
-		"message":        "Application approved successfully",
+		"message":        "Application approved and credit offer generated successfully",
 	})
 }
 

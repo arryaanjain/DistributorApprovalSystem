@@ -12,72 +12,72 @@ import (
 
 // DistributorRecord is a row from the distributors table.
 type DistributorRecord struct {
-	ID        string
-	Mobile    string
-	Email     *string
-	Name      *string
-	IsActive  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        string    `json:"id"`
+	Mobile    string    `json:"mobile"`
+	Email     *string   `json:"email,omitempty"`
+	Name      *string   `json:"name,omitempty"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // BusinessProfileRecord maps to business_profiles.
 type BusinessProfileRecord struct {
-	ID                          string
-	DistributorID               string
-	BusinessName                string
-	Constitution                string
-	AddressLine1                string
-	AddressLine2                *string
-	City                        string
-	State                       string
-	PIN                         string
-	VintageYears                *float64
-	FMCGExperienceYears         *float64
-	DistributionExperienceYears *float64
-	ApproxMonthlyBusinessPaise  *int64
-	RetailerCount               *int
-	ServicedRetailersWholesalersCount *int
-	SalespersonCount            *int
-	InterestedBusinessRole      *string
-	ExistingBrands              []string
+	ID                          string   `json:"id"`
+	DistributorID               string   `json:"distributor_id"`
+	BusinessName                string   `json:"business_name"`
+	Constitution                string   `json:"constitution"`
+	AddressLine1                string   `json:"address_line1"`
+	AddressLine2                *string  `json:"address_line2,omitempty"`
+	City                        string   `json:"city"`
+	State                       string   `json:"state"`
+	PIN                         string   `json:"pin"`
+	VintageYears                *float64 `json:"vintage_years,omitempty"`
+	FMCGExperienceYears         *float64 `json:"fmcg_experience_years,omitempty"`
+	DistributionExperienceYears *float64 `json:"distribution_experience_years,omitempty"`
+	ApproxMonthlyBusinessPaise  *int64   `json:"approx_monthly_business_paise,omitempty"`
+	RetailerCount               *int     `json:"retailer_count,omitempty"`
+	ServicedRetailersWholesalersCount *int `json:"serviced_retailers_wholesalers_count,omitempty"`
+	SalespersonCount            *int     `json:"salesperson_count,omitempty"`
+	InterestedBusinessRole      *string  `json:"interested_business_role,omitempty"`
+	ExistingBrands              []string `json:"existing_brands,omitempty"`
 }
 
 // BusinessDocumentRecord maps to business_documents.
 type BusinessDocumentRecord struct {
-	ID             string
-	DistributorID  string
-	PAN            *string
-	GSTNumber      *string
-	FSSAINumber    *string
-	UdyamNumber    *string
-	ShopEstNumber  *string
-	HasGST         bool
+	ID             string  `json:"id"`
+	DistributorID  string  `json:"distributor_id"`
+	PAN            *string `json:"pan,omitempty"`
+	GSTNumber      *string `json:"gst_number,omitempty"`
+	FSSAINumber    *string `json:"fssai_number,omitempty"`
+	UdyamNumber    *string `json:"udyam_number,omitempty"`
+	ShopEstNumber  *string `json:"shop_est_number,omitempty"`
+	HasGST         bool    `json:"has_gst"`
 }
 
 // BankDetailRecord maps to bank_details.
 type BankDetailRecord struct {
-	ID             string
-	DistributorID  string
-	AccountNumber  string
-	IFSC           string
-	AccountHolder  string
-	BankName       *string
-	Branch         *string
+	ID             string  `json:"id"`
+	DistributorID  string  `json:"distributor_id"`
+	AccountNumber  string  `json:"account_number"`
+	IFSC           string  `json:"ifsc"`
+	AccountHolder  string  `json:"account_holder"`
+	BankName       *string `json:"bank_name,omitempty"`
+	Branch         *string `json:"branch,omitempty"`
 }
 
 // ApplicationRecord maps to the applications table.
 type ApplicationRecord struct {
-	ID                  string
-	DistributorID       string
-	Status              string
-	PaymentPreference   *string
-	ExposureClass       *string
-	IsDuplicateSuspect  bool
-	DuplicateReason     *string
-	SubmittedAt         *time.Time
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                  string     `json:"id"`
+	DistributorID       string     `json:"distributor_id"`
+	Status              string     `json:"status"`
+	PaymentPreference   *string    `json:"payment_preference,omitempty"`
+	ExposureClass       *string    `json:"exposure_class,omitempty"`
+	IsDuplicateSuspect  bool       `json:"is_duplicate_suspect"`
+	DuplicateReason     *string    `json:"duplicate_reason,omitempty"`
+	SubmittedAt         *time.Time `json:"submitted_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // DistributorRepository handles all distributor-related DB operations.

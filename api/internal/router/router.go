@@ -100,6 +100,7 @@ func New(deps *Dependencies) http.Handler {
 		// ── Credit ─────────────────────────────────────────────────────────────
 		r.Route("/credit", func(r chi.Router) {
 			r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
+			r.Post("/{applicationId}/evaluate", h.Credit.Evaluate)
 			r.Post("/{applicationId}/score",    h.Credit.Score)
 			r.Post("/{applicationId}/decide",   h.Credit.Decide)
 			r.Get("/{applicationId}/decision",  h.Credit.GetDecision)
