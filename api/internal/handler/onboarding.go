@@ -78,19 +78,24 @@ func (h *OnboardingHandler) SubmitStatutory(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	dupResult, err := h.svc.SubmitStatutory(r.Context(), distID, &req)
+	result, err := h.svc.SubmitStatutory(r.Context(), distID, &req)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
 	resp := map[string]interface{}{
-		"message":   "statutory details saved",
-		"next_step": "bank",
+		"message":         "statutory details saved",
+		"next_step":       "bank",
+		"pan_verified":    result.PANVerified,
+		"gst_verified":    result.GSTVerified,
+		"pan_holder_name": result.PANHolderName,
+		"gst_legal_name":  result.GSTLegalName,
+		"warnings":        result.Warnings,
 	}
-	if dupResult != nil && dupResult.SuspectFound {
+	if result.DuplicateResult != nil && result.DuplicateResult.SuspectFound {
 		resp["warning"] = "your application contains identifiers that match an existing record and has been flagged for review"
-		resp["matched_on"] = dupResult.MatchedOn
+		resp["matched_on"] = result.DuplicateResult.MatchedOn
 	}
 
 	response.JSON(w, resp)

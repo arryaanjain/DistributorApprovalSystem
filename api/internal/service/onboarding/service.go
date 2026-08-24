@@ -165,8 +165,24 @@ type StatutoryInput struct {
 	ShopEstNumber string `json:"shop_est_number"`
 }
 
-// SubmitStatutory saves statutory identifiers and runs duplicate detection.
-func (s *Service) SubmitStatutory(ctx context.Context, distributorID string, in *StatutoryInput) (*DuplicateCheckResult, error) {
+// StatutoryResult holds duplicate check results, verification statuses, and warnings.
+type StatutoryResult struct {
+	DuplicateResult *DuplicateCheckResult `json:"duplicate_result,omitempty"`
+	Warnings        []string              `json:"warnings,omitempty"`
+	PANVerified     bool                  `json:"pan_verified"`
+	GSTVerified     bool                  `json:"gst_verified"`
+	PANHolderName   string                `json:"pan_holder_name,omitempty"`
+	GSTLegalName    string                `json:"gst_legal_name,omitempty"`
+}
+
+// DuplicateCheckResult tells the caller whether suspicious matches were found.
+type DuplicateCheckResult struct {
+	SuspectFound bool     `json:"suspect_found"`
+	MatchedOn    []string `json:"matched_on,omitempty"`
+}
+
+// SubmitStatutory saves statutory identifiers, performs real-time PAN & GST verifications, and runs duplicate detection.
+func (s *Service) SubmitStatutory(ctx context.Context, distributorID string, in *StatutoryInput) (*StatutoryResult, error) {
 	app, err := s.requireActiveApplication(ctx, distributorID)
 	if err != nil {
 		return nil, err
@@ -191,16 +207,84 @@ func (s *Service) SubmitStatutory(ctx context.Context, distributorID string, in 
 	// ── Duplicate Detection (Phase 1) ──────────────────────────────────────
 	dupResult := s.runStatutoryDuplicateCheck(ctx, distributorID, app.ID, in)
 
+	// Fetch Step 1 details for real-time name / business name cross-validation
+	dist, _ := s.distRepo.GetByID(ctx, distributorID)
+	step1Name := ""
+	if dist != nil && dist.Name != nil {
+		step1Name = *dist.Name
+	}
+
+	bp, _ := s.distRepo.GetBusinessProfile(ctx, distributorID)
+	step1BusinessName := ""
+	if bp != nil {
+		step1BusinessName = bp.BusinessName
+	}
+
+	warnings := []string{}
+	panVerified := false
+	gstVerified := false
+	panHolderName := ""
+	gstLegalName := ""
+
+	// ── Real-time PAN Verification ─────────────────────────────────────────
+	if s.verSvc != nil && in.PAN != "" {
+		panRes, err := s.verSvc.VerifyPANOnly(ctx, distributorID, app.ID, in.PAN, step1Name)
+		if err != nil {
+			slog.Error("real-time PAN verification error", "error", err, "distributor_id", distributorID)
+			warnings = append(warnings, "PAN verification service unavailable; flagged for manual review")
+		} else if panRes != nil {
+			slog.Info("real-time PAN verification result", "status", panRes.Status, "name", panRes.NameOnPAN, "distributor_id", distributorID)
+			panHolderName = panRes.NameOnPAN
+			if panRes.Status == "verified" {
+				panVerified = true
+			} else if panRes.Status == "mismatch" {
+				warnings = append(warnings, fmt.Sprintf("PAN holder name '%s' does not match registered name '%s'", panRes.NameOnPAN, step1Name))
+			} else if panRes.Status == "failed" || panRes.Status == "unavailable" {
+				warnings = append(warnings, "PAN verification failed with tax authority records")
+			}
+		}
+	}
+
+	// ── Real-time GST Verification ─────────────────────────────────────────
+	if s.verSvc != nil && in.GSTNumber != "" {
+		gstRes, err := s.verSvc.VerifyGSTOnly(ctx, distributorID, app.ID, in.GSTNumber, step1BusinessName)
+		if err != nil {
+			slog.Error("real-time GST verification error", "error", err, "distributor_id", distributorID)
+			warnings = append(warnings, "GST verification service unavailable; flagged for manual review")
+		} else if gstRes != nil {
+			slog.Info("real-time GST verification result", "status", gstRes.Status, "legal_name", gstRes.LegalName, "distributor_id", distributorID)
+			gstLegalName = gstRes.LegalName
+			if gstRes.Status == "verified" || gstRes.Status == "partially_verified" {
+				gstVerified = true
+			} else if gstRes.Status == "mismatch" {
+				warnings = append(warnings, fmt.Sprintf("GST legal name '%s' / trade name '%s' does not match business name '%s'", gstRes.LegalName, gstRes.TradeName, step1BusinessName))
+			} else if gstRes.Status == "failed" || gstRes.Status == "unavailable" {
+				warnings = append(warnings, "GST verification failed with GSTIN portal records")
+			}
+
+			// Cross-validate address details if available
+			if bp != nil && gstRes.Address != "" {
+				addrUpper := strings.ToUpper(gstRes.Address)
+				cityUpper := strings.ToUpper(bp.City)
+				pinStr := bp.PIN
+				if cityUpper != "" && !strings.Contains(addrUpper, cityUpper) && pinStr != "" && !strings.Contains(addrUpper, pinStr) {
+					warnings = append(warnings, fmt.Sprintf("GST address ('%s') differs from registered location (%s, PIN: %s)", gstRes.Address, bp.City, bp.PIN))
+				}
+			}
+		}
+	}
+
 	reason := "statutory details submitted"
 	_ = s.distRepo.UpdateApplicationStatus(ctx, app.ID, "statutory_submitted", "distributor", &distributorID, &reason)
 
-	return dupResult, nil
-}
-
-// DuplicateCheckResult tells the caller whether suspicious matches were found.
-type DuplicateCheckResult struct {
-	SuspectFound bool     `json:"suspect_found"`
-	MatchedOn    []string `json:"matched_on,omitempty"`
+	return &StatutoryResult{
+		DuplicateResult: dupResult,
+		Warnings:        warnings,
+		PANVerified:     panVerified,
+		GSTVerified:     gstVerified,
+		PANHolderName:   panHolderName,
+		GSTLegalName:    gstLegalName,
+	}, nil
 }
 
 func (s *Service) runStatutoryDuplicateCheck(ctx context.Context, distributorID, appID string, in *StatutoryInput) *DuplicateCheckResult {
