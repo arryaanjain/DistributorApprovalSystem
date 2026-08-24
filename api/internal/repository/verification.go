@@ -23,72 +23,72 @@ const (
 
 // PANVerificationRecord maps to pan_verifications.
 type PANVerificationRecord struct {
-	ID            string
-	DistributorID string
-	ApplicationID *string
-	PAN           string
-	Status        VerificationStatus
-	NameOnPAN     *string
-	NameMatch     *bool
-	ProviderRef   *string
-	VerifiedAt    *time.Time
-	CreatedAt     time.Time
+	ID            string             `json:"id"`
+	DistributorID string             `json:"distributor_id"`
+	ApplicationID *string            `json:"application_id,omitempty"`
+	PAN           string             `json:"pan"`
+	Status        VerificationStatus `json:"status"`
+	NameOnPAN     *string            `json:"name_on_pan,omitempty"`
+	NameMatch     *bool              `json:"name_match,omitempty"`
+	ProviderRef   *string            `json:"provider_ref,omitempty"`
+	VerifiedAt    *time.Time         `json:"verified_at,omitempty"`
+	CreatedAt     time.Time          `json:"created_at"`
 }
 
 // GSTVerificationRecord maps to gst_verifications.
 type GSTVerificationRecord struct {
-	ID               string
-	DistributorID    string
-	ApplicationID    *string
-	GSTNumber        string
-	Status           VerificationStatus
-	LegalName        *string
-	TradeName        *string
-	RegistrationDate *time.Time
-	GSTStatus        *string
-	Address          *string
-	Constitution     *string
-	NameMatch        *bool
-	ProviderRef      *string
-	VerifiedAt       *time.Time
-	CreatedAt        time.Time
+	ID               string             `json:"id"`
+	DistributorID    string             `json:"distributor_id"`
+	ApplicationID    *string            `json:"application_id,omitempty"`
+	GSTNumber        string             `json:"gst_number"`
+	Status           VerificationStatus `json:"status"`
+	LegalName        *string            `json:"legal_name,omitempty"`
+	TradeName        *string            `json:"trade_name,omitempty"`
+	RegistrationDate *time.Time         `json:"registration_date,omitempty"`
+	GSTStatus        *string            `json:"gst_status,omitempty"`
+	Address          *string            `json:"address,omitempty"`
+	Constitution     *string            `json:"constitution,omitempty"`
+	NameMatch        *bool              `json:"name_match,omitempty"`
+	ProviderRef      *string            `json:"provider_ref,omitempty"`
+	VerifiedAt       *time.Time         `json:"verified_at,omitempty"`
+	CreatedAt        time.Time          `json:"created_at"`
 }
 
 // BankVerificationRecord maps to bank_verifications.
 type BankVerificationRecord struct {
-	ID             string
-	DistributorID  string
-	ApplicationID  *string
-	AccountNumber  string
-	IFSC           string
-	Status         VerificationStatus
-	AccountHolder  *string
-	NameMatch      *bool
-	BankName       *string
-	ProviderRef    *string
-	VerifiedAt     *time.Time
-	CreatedAt      time.Time
+	ID            string             `json:"id"`
+	DistributorID string             `json:"distributor_id"`
+	ApplicationID *string            `json:"application_id,omitempty"`
+	AccountNumber string             `json:"account_number"`
+	IFSC          string             `json:"ifsc"`
+	Status        VerificationStatus `json:"status"`
+	AccountHolder *string            `json:"account_holder,omitempty"`
+	NameMatch     *bool              `json:"name_match,omitempty"`
+	BankName      *string            `json:"bank_name,omitempty"`
+	ProviderRef   *string            `json:"provider_ref,omitempty"`
+	VerifiedAt    *time.Time         `json:"verified_at,omitempty"`
+	CreatedAt     time.Time          `json:"created_at"`
 }
 
 // CreditReportRecord maps to credit_reports.
 type CreditReportRecord struct {
-	ID                  string
-	DistributorID       string
-	ApplicationID       *string
-	PAN                 *string
-	Mobile              *string
-	BureauScore         *int
-	HasDefaults         *bool
-	HasWriteoffs        *bool
-	HasSettlements      *bool
-	TotalActiveLoans    *int64
-	DelinquencyCount    *int
-	FraudFlag           bool
-	ReportDate          *time.Time
-	PDFURL              *string
-	ProviderRef         *string
-	FetchedAt           *time.Time
-	CreatedAt           time.Time
+	ID               string     `json:"id"`
+	DistributorID    string     `json:"distributor_id"`
+	ApplicationID    *string    `json:"application_id,omitempty"`
+	PAN              *string    `json:"pan,omitempty"`
+	Mobile           *string    `json:"mobile,omitempty"`
+	BureauScore      *int       `json:"bureau_score,omitempty"`
+	HasDefaults      *bool      `json:"has_defaults,omitempty"`
+	HasWriteoffs     *bool      `json:"has_writeoffs,omitempty"`
+	HasSettlements   *bool      `json:"has_settlements,omitempty"`
+	TotalActiveLoans *int64     `json:"total_active_loans,omitempty"`
+	DelinquencyCount *int       `json:"delinquency_count,omitempty"`
+	FraudFlag        bool       `json:"fraud_flag"`
+	ReportDate       *time.Time `json:"report_date,omitempty"`
+	PDFURL           *string    `json:"pdf_url,omitempty"`
+	ProviderRef      *string    `json:"provider_ref,omitempty"`
+	FetchedAt        *time.Time `json:"fetched_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 // VerificationRepository handles all verification table operations.
@@ -112,9 +112,9 @@ func (r *VerificationRepository) CreatePANVerification(ctx context.Context, dist
 func (r *VerificationRepository) UpdatePANVerification(ctx context.Context, id string, status VerificationStatus, nameOnPAN *string, nameMatch *bool, rawResp []byte, providerRef *string) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE pan_verifications SET
-		 status = $1, name_on_pan = $2, name_match = $3,
+		 status = $1::verification_status, name_on_pan = $2, name_match = $3,
 		 raw_response = $4, provider_ref = $5,
-		 verified_at = CASE WHEN $1 = 'verified' THEN NOW() ELSE NULL END
+		 verified_at = CASE WHEN $1::TEXT = 'verified' THEN NOW() ELSE NULL END
 		 WHERE id = $6`,
 		status, nameOnPAN, nameMatch, rawResp, providerRef, id)
 	return err
@@ -151,10 +151,10 @@ func (r *VerificationRepository) UpdateGSTVerification(ctx context.Context, id s
 	nameMatch *bool, rawResp []byte, providerRef *string) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE gst_verifications SET
-		 status = $1, legal_name = $2, trade_name = $3, registration_date = $4,
+		 status = $1::verification_status, legal_name = $2, trade_name = $3, registration_date = $4,
 		 gst_status = $5, address = $6, constitution = $7, name_match = $8,
 		 raw_response = $9, provider_ref = $10,
-		 verified_at = CASE WHEN $1 = 'verified' THEN NOW() ELSE NULL END
+		 verified_at = CASE WHEN $1::TEXT = 'verified' THEN NOW() ELSE NULL END
 		 WHERE id = $11`,
 		status, legalName, tradeName, regDate, gstStatus, address, constitution,
 		nameMatch, rawResp, providerRef, id)
@@ -193,9 +193,9 @@ func (r *VerificationRepository) UpdateBankVerification(ctx context.Context, id 
 	accountHolder, bankName *string, nameMatch *bool, rawResp []byte, providerRef *string) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE bank_verifications SET
-		 status = $1, account_holder = $2, bank_name = $3, name_match = $4,
+		 status = $1::verification_status, account_holder = $2, bank_name = $3, name_match = $4,
 		 raw_response = $5, provider_ref = $6,
-		 verified_at = CASE WHEN $1 = 'verified' THEN NOW() ELSE NULL END
+		 verified_at = CASE WHEN $1::TEXT = 'verified' THEN NOW() ELSE NULL END
 		 WHERE id = $7`,
 		status, accountHolder, bankName, nameMatch, rawResp, providerRef, id)
 	return err
@@ -247,7 +247,8 @@ func (r *VerificationRepository) GetLatestCreditReport(ctx context.Context, dist
 		`SELECT id, distributor_id, application_id, pan, mobile, bureau_score,
 		        has_defaults, has_writeoffs, has_settlements, total_active_loans,
 		        delinquency_count, fraud_flag, report_date, pdf_url, provider_ref, fetched_at, created_at
-		 FROM credit_reports WHERE distributor_id = $1 ORDER BY created_at DESC LIMIT 1`, distributorID)
+		 FROM credit_reports WHERE distributor_id = $1
+		 ORDER BY bureau_score IS NOT NULL DESC, created_at DESC LIMIT 1`, distributorID)
 	v := &CreditReportRecord{}
 	err := row.Scan(&v.ID, &v.DistributorID, &v.ApplicationID, &v.PAN, &v.Mobile,
 		&v.BureauScore, &v.HasDefaults, &v.HasWriteoffs, &v.HasSettlements,
@@ -261,10 +262,10 @@ func (r *VerificationRepository) GetLatestCreditReport(ctx context.Context, dist
 
 // GetAllForApplication returns the latest verification of each type for an application.
 type AllVerifications struct {
-	PAN          *PANVerificationRecord
-	GST          *GSTVerificationRecord
-	Bank         *BankVerificationRecord
-	CreditReport *CreditReportRecord
+	PAN          *PANVerificationRecord  `json:"pan,omitempty"`
+	GST          *GSTVerificationRecord  `json:"gst,omitempty"`
+	Bank         *BankVerificationRecord `json:"bank,omitempty"`
+	CreditReport *CreditReportRecord     `json:"credit_report,omitempty"`
 }
 
 func (r *VerificationRepository) GetAllForApplication(ctx context.Context, distributorID string) (*AllVerifications, error) {

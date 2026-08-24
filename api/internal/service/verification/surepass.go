@@ -79,17 +79,31 @@ type CreditReportResult struct {
 // ────────────────────────────────────────────────────────────────────────────
 
 // SurepassClient is the HTTP client for the Surepass API.
+// PAN, GST, Bank use baseURL (kyc-api.surepass.io).
+// CIBIL uses cibilBaseURL (app.surepass.app/production).
 type SurepassClient struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL      string
+	cibilBaseURL string
+	token        string
+	cibilToken   string
+	httpClient   *http.Client
 }
 
 // NewSurepassClient creates a Surepass API client.
-func NewSurepassClient(baseURL, token string) *SurepassClient {
+// cibilBaseURL defaults to "https://app.surepass.app/production/api/v1".
+// cibilToken defaults to token if empty.
+func NewSurepassClient(baseURL, cibilBaseURL, token, cibilToken string) *SurepassClient {
+	if cibilBaseURL == "" {
+		cibilBaseURL = baseURL
+	}
+	if cibilToken == "" {
+		cibilToken = token
+	}
 	return &SurepassClient{
-		baseURL: baseURL,
-		token:   token,
+		baseURL:      baseURL,
+		cibilBaseURL: cibilBaseURL,
+		token:        token,
+		cibilToken:   cibilToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -97,16 +111,24 @@ func NewSurepassClient(baseURL, token string) *SurepassClient {
 }
 
 func (c *SurepassClient) post(ctx context.Context, path string, body interface{}) (json.RawMessage, error) {
+	return c.doPost(ctx, c.baseURL+path, body, c.token)
+}
+
+func (c *SurepassClient) postCIBIL(ctx context.Context, path string, body interface{}) (json.RawMessage, error) {
+	return c.doPost(ctx, c.cibilBaseURL+path, body, c.cibilToken)
+}
+
+func (c *SurepassClient) doPost(ctx context.Context, url string, body interface{}, bearerToken string) (json.RawMessage, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+bearerToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -132,24 +154,54 @@ func (c *SurepassClient) post(ctx context.Context, path string, body interface{}
 // ────────────────────────────────────────────────────────────────────────────
 
 type panRequest struct {
-	IDNUMBER string `json:"id_number"`
+	IDNumber             string `json:"id_number"`
+	GetAddress           string `json:"get_address"`
+	GetContact           string `json:"get_contact"`
+	MaskedAadhaarVariant string `json:"masked_aadhaar_variant"`
+}
+
+// PANAddress holds address data returned by PAN Comprehensive.
+type PANAddress struct {
+	Full       string `json:"full"`
+	Line1      string `json:"line_1"`
+	Line2      string `json:"line_2"`
+	StreetName string `json:"street_name"`
+	Zip        string `json:"zip"`
+	City       string `json:"city"`
+	State      string `json:"state"`
+	Country    string `json:"country"`
 }
 
 type surepassPANResponse struct {
 	Data struct {
-		ClientID   string `json:"client_id"`
-		IDNumber   string `json:"id_number"`
-		Name       string `json:"name"`
-		Status     string `json:"status"`
+		ClientID      string      `json:"client_id"`
+		PANNumber     string      `json:"pan_number"`
+		FullName      string      `json:"full_name"`
+		FullNameSplit []string    `json:"full_name_split"`
+		Status        string      `json:"status"`   // "valid" (lowercase)
+		Category      string      `json:"category"` // "person" / "company"
+		DOB           string      `json:"dob"`
+		Gender        string      `json:"gender"`
+		Email         interface{} `json:"email"`
+		PhoneNumber   interface{} `json:"phone_number"`
+		AadhaarLinked bool        `json:"aadhaar_linked"`
+		MaskedAadhaar string      `json:"masked_aadhaar"`
+		Address       interface{} `json:"address"`
 	} `json:"data"`
-	StatusCode int    `json:"status_code"`
-	Message    string `json:"message"`
-	Success    bool   `json:"success"`
+	StatusCode  int         `json:"status_code"`
+	Message     interface{} `json:"message"`
+	MessageCode string      `json:"message_code"`
+	Success     bool        `json:"success"`
 }
 
-// VerifyPAN calls Surepass pan-comprehensive and returns a normalized PANResult.
+// VerifyPAN calls Surepass pan/pan-comprehensive and returns a normalized PANResult.
 func (c *SurepassClient) VerifyPAN(ctx context.Context, pan, expectedName string) (*PANResult, error) {
-	raw, err := c.post(ctx, "/pan-comprehensive", panRequest{IDNUMBER: pan})
+	raw, err := c.post(ctx, "/pan/pan-comprehensive", panRequest{
+		IDNumber:             pan,
+		GetAddress:           "yes",
+		GetContact:           "yes",
+		MaskedAadhaarVariant: "v1",
+	})
 	if err != nil {
 		return &PANResult{Status: StatusUnavailable, RawResponse: raw}, nil
 	}
@@ -159,16 +211,17 @@ func (c *SurepassClient) VerifyPAN(ctx context.Context, pan, expectedName string
 		return &PANResult{Status: StatusFailed, RawResponse: raw}, nil
 	}
 
-	if !resp.Success || resp.Data.Status == "" {
+	// Accept if status_code == 200 OR success is true OR full_name is present
+	if !resp.Success && resp.StatusCode != 200 && resp.Data.FullName == "" {
 		return &PANResult{Status: StatusFailed, RawResponse: raw}, nil
 	}
 
 	status := StatusVerified
 	nameMatch := false
-	if resp.Data.Status != "VALID" {
+	if resp.Data.Status != "" && resp.Data.Status != "valid" {
 		status = StatusFailed
 	} else if expectedName != "" {
-		nameMatch = namesMatch(resp.Data.Name, expectedName)
+		nameMatch = namesMatch(resp.Data.FullName, expectedName)
 		if !nameMatch {
 			status = StatusMismatch
 		}
@@ -176,7 +229,7 @@ func (c *SurepassClient) VerifyPAN(ctx context.Context, pan, expectedName string
 
 	return &PANResult{
 		Status:      status,
-		NameOnPAN:   resp.Data.Name,
+		NameOnPAN:   resp.Data.FullName,
 		NameMatch:   &nameMatch,
 		ProviderRef: resp.Data.ClientID,
 		RawResponse: raw,
@@ -184,31 +237,37 @@ func (c *SurepassClient) VerifyPAN(ctx context.Context, pan, expectedName string
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GST (corporate-gstin)
+// GST (corporate/gstin)
 // ────────────────────────────────────────────────────────────────────────────
 
 type gstRequest struct {
-	GSTIN string `json:"gstin"`
+	IDNumber string `json:"id_number"`
 }
 
 type surepassGSTResponse struct {
 	Data struct {
-		ClientID         string `json:"client_id"`
-		GSTINStatus      string `json:"gstin_status"`
-		LegalName        string `json:"legal_name_of_business"`
-		TradeName        string `json:"trade_name"`
-		DateOfReg        string `json:"date_of_registration"`
-		PrincipalAddress string `json:"principal_place_address"`
-		ConstitutionType string `json:"constitution_of_business"`
+		ClientID          string      `json:"client_id"`
+		GSTIN             string      `json:"gstin"`
+		PANNumber         string      `json:"pan_number"`
+		BusinessName      string      `json:"business_name"`
+		LegalName         string      `json:"legal_name"`
+		GSTINStatus       string      `json:"gstin_status"`
+		DateOfReg         string      `json:"date_of_registration"`
+		Address           interface{} `json:"address"`
+		PrincipalAddress  string      `json:"principal_place_address"`
+		ConstitutionType  string      `json:"constitution_of_business"`
+		TaxpayerType      string      `json:"taxpayer_type"`
+		AadhaarValidation string      `json:"aadhaar_validation"`
 	} `json:"data"`
-	StatusCode int    `json:"status_code"`
-	Message    string `json:"message"`
-	Success    bool   `json:"success"`
+	StatusCode  int         `json:"status_code"`
+	Message     interface{} `json:"message"`
+	MessageCode string      `json:"message_code"`
+	Success     bool        `json:"success"`
 }
 
-// VerifyGST calls Surepass corporate-gstin and returns a normalized GSTResult.
+// VerifyGST calls Surepass corporate/gstin and returns a normalized GSTResult.
 func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedName string) (*GSTResult, error) {
-	raw, err := c.post(ctx, "/corporate-gstin", gstRequest{GSTIN: gstin})
+	raw, err := c.post(ctx, "/corporate/gstin", gstRequest{IDNumber: gstin})
 	if err != nil {
 		return &GSTResult{Status: StatusUnavailable, RawResponse: raw}, nil
 	}
@@ -218,19 +277,20 @@ func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedName stri
 		return &GSTResult{Status: StatusFailed, RawResponse: raw}, nil
 	}
 
-	if !resp.Success {
+	// Accept if status_code == 200 OR success is true OR legal_name/business_name is present
+	if !resp.Success && resp.StatusCode != 200 && resp.Data.LegalName == "" && resp.Data.BusinessName == "" {
 		return &GSTResult{Status: StatusFailed, RawResponse: raw}, nil
 	}
 
 	status := StatusVerified
-	if resp.Data.GSTINStatus != "Active" {
+	if resp.Data.GSTINStatus != "" && resp.Data.GSTINStatus != "Active" {
 		status = StatusPartiallyVerified
 	}
 
 	nameMatch := false
 	if expectedName != "" {
 		nameMatch = namesMatch(resp.Data.LegalName, expectedName) ||
-			namesMatch(resp.Data.TradeName, expectedName)
+			namesMatch(resp.Data.BusinessName, expectedName)
 		if !nameMatch {
 			status = StatusMismatch
 		}
@@ -238,18 +298,26 @@ func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedName stri
 
 	var regDate *time.Time
 	if resp.Data.DateOfReg != "" {
-		if t, err := time.Parse("02/01/2006", resp.Data.DateOfReg); err == nil {
+		// Surepass returns ISO 8601 format: "2021-10-20"
+		if t, err := time.Parse("2006-01-02", resp.Data.DateOfReg); err == nil {
 			regDate = &t
 		}
+	}
+
+	addressStr := ""
+	if str, ok := resp.Data.Address.(string); ok {
+		addressStr = str
+	} else if resp.Data.PrincipalAddress != "" {
+		addressStr = resp.Data.PrincipalAddress
 	}
 
 	return &GSTResult{
 		Status:           status,
 		LegalName:        resp.Data.LegalName,
-		TradeName:        resp.Data.TradeName,
+		TradeName:        resp.Data.BusinessName,
 		RegistrationDate: regDate,
 		GSTStatus:        resp.Data.GSTINStatus,
-		Address:          resp.Data.PrincipalAddress,
+		Address:          addressStr,
 		Constitution:     resp.Data.ConstitutionType,
 		NameMatch:        &nameMatch,
 		ProviderRef:      resp.Data.ClientID,
@@ -320,34 +388,83 @@ func (c *SurepassClient) VerifyBankAccount(ctx context.Context, accountNumber, i
 
 // ────────────────────────────────────────────────────────────────────────────
 // CIBIL Credit Report (credit-report-cibil)
+// Hosted on app.surepass.app/production (separate from KYC base URL)
 // ────────────────────────────────────────────────────────────────────────────
 
 type cibilRequest struct {
-	MobileNumber string `json:"mobile_number"`
-	PAN          string `json:"pan"`
+	Mobile  string `json:"mobile"`
+	PAN     string `json:"pan"`
+	Name    string `json:"name"`
+	Gender  string `json:"gender"`  // "male" / "female"
+	Consent string `json:"consent"` // "Y"
 }
 
+// Actual Surepass CIBIL response structure (deeply nested).
 type surepassCIBILResponse struct {
 	Data struct {
-		ClientID    string `json:"client_id"`
-		CreditScore int    `json:"credit_score"`
-		ReportURL   string `json:"report_url"`
-		Accounts    []struct {
-			AccountStatus string  `json:"account_status"`
-			CurrentBalance float64 `json:"current_balance"`
-			OverdueAmount  float64 `json:"overdue_amount"`
-		} `json:"accounts"`
+		ClientID     string `json:"client_id"`
+		CreditScore  string `json:"credit_score"` // string, e.g. "750"
+		CreditReport []struct {
+			Scores []struct {
+				Score         string `json:"score"`
+				ScoreCardName string `json:"scoreCardName"`
+			} `json:"scores"`
+			Accounts []struct {
+				AccountType    string `json:"accountType"`
+				AccountNumber  string `json:"accountNumber"`
+				CurrentBalance string `json:"currentBalance"`
+				AmountOverdue  string `json:"amountOverdue"`
+				DateOpened     string `json:"dateOpened"`
+				DateClosed     string `json:"dateClosed"`
+				PaymentHistory string `json:"paymentHistory"`
+				OwnershipInd   string `json:"ownershipIndicator"`
+			} `json:"accounts"`
+			Response struct {
+				ConsumerSummary struct {
+					AccountSummary struct {
+						TotalAccounts    int    `json:"totalAccounts"`
+						OverdueAccounts  int    `json:"overdueAccounts"`
+						ZeroBalAccounts  int    `json:"zeroBalanceAccounts"`
+						HighCreditAmount int64  `json:"highCreditAmount"`
+						CurrentBalance   int64  `json:"currentBalance"`
+						OverdueBalance   int64  `json:"overdueBalance"`
+						RecentDateOpened string `json:"recentDateOpened"`
+					} `json:"accountSummary"`
+				} `json:"consumerSummaryresp"`
+			} `json:"response"`
+		} `json:"credit_report"`
 	} `json:"data"`
-	StatusCode int    `json:"status_code"`
-	Message    string `json:"message"`
-	Success    bool   `json:"success"`
+	StatusCode  int     `json:"status_code"`
+	Message     *string `json:"message"`
+	MessageCode string  `json:"message_code"`
+	Success     bool    `json:"success"`
 }
 
-// FetchCreditReport calls Surepass credit-report-cibil.
-func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan string) (*CreditReportResult, error) {
-	raw, err := c.post(ctx, "/credit-report-cibil", cibilRequest{
-		MobileNumber: mobile,
-		PAN:          pan,
+// CIBIL PDF response structure.
+type surepassCIBILPDFResponse struct {
+	Data struct {
+		ClientID         string  `json:"client_id"`
+		CreditScore      string  `json:"credit_score"`
+		CreditReportLink string  `json:"credit_report_link"`
+	} `json:"data"`
+	StatusCode  int     `json:"status_code"`
+	Message     *string `json:"message"`
+	MessageCode string  `json:"message_code"`
+	Success     bool    `json:"success"`
+}
+
+// FetchCreditReport calls Surepass credit-report-cibil/fetch-report (JSON).
+// name and gender are required by the API.
+func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan, name, gender string) (*CreditReportResult, error) {
+	if gender == "" {
+		gender = "male"
+	}
+	raw, err := c.postCIBIL(ctx, "/credit-report-cibil/fetch-report", cibilRequest{
+		Mobile:  mobile,
+		PAN:     pan,
+		Name:    name,
+		Gender:  gender,
+		Consent: "Y",
 	})
 	if err != nil {
 		return &CreditReportResult{RawResponse: raw}, nil
@@ -362,27 +479,49 @@ func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan stri
 		return &CreditReportResult{RawResponse: raw}, nil
 	}
 
-	// Analyze accounts for defaults, write-offs
+	// Parse credit score from string
+	score := 0
+	if resp.Data.CreditScore != "" {
+		fmt.Sscanf(resp.Data.CreditScore, "%d", &score)
+	} else if len(resp.Data.CreditReport) > 0 && len(resp.Data.CreditReport[0].Scores) > 0 {
+		fmt.Sscanf(resp.Data.CreditReport[0].Scores[0].Score, "%d", &score)
+	}
+
+	// Analyze accounts for defaults, write-offs from the first report block
 	var hasDefaults, hasWriteoffs, hasSettlements bool
 	var totalLoans int64
 	var delinquencies int
-	for _, acct := range resp.Data.Accounts {
-		switch acct.AccountStatus {
-		case "Defaulted":
+
+	if len(resp.Data.CreditReport) > 0 {
+		report := resp.Data.CreditReport[0]
+		for _, acct := range report.Accounts {
+			// Parse overdue amount
+			var overdueAmt float64
+			fmt.Sscanf(acct.AmountOverdue, "%f", &overdueAmt)
+			var curBal float64
+			fmt.Sscanf(acct.CurrentBalance, "%f", &curBal)
+
+			if overdueAmt > 0 {
+				delinquencies++
+				hasDefaults = true
+			}
+			// Check payment history for write-offs and settlements
+			if strings.Contains(acct.PaymentHistory, "WOF") || acct.DateClosed == "NA" && overdueAmt > 0 {
+				hasWriteoffs = true
+			}
+			if strings.Contains(acct.PaymentHistory, "SET") {
+				hasSettlements = true
+			}
+			totalLoans += int64(curBal * 100) // convert to paise
+		}
+
+		// Also use the summary if available
+		summary := report.Response.ConsumerSummary.AccountSummary
+		if summary.OverdueAccounts > 0 {
 			hasDefaults = true
-			delinquencies++
-		case "Written-off":
-			hasWriteoffs = true
-		case "Settled":
-			hasSettlements = true
 		}
-		if acct.OverdueAmount > 0 {
-			delinquencies++
-		}
-		totalLoans += int64(acct.CurrentBalance * 100) // convert to paise
 	}
 
-	score := resp.Data.CreditScore
 	now := time.Now()
 
 	return &CreditReportResult{
@@ -392,26 +531,80 @@ func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan stri
 		HasSettlements:   hasSettlements,
 		TotalActiveLoans: totalLoans,
 		DelinquencyCount: delinquencies,
-		FraudFlag:        false, // Surepass doesn't return this directly
+		FraudFlag:        false,
 		ReportDate:       &now,
-		PDFURL:           resp.Data.ReportURL,
 		ProviderRef:      resp.Data.ClientID,
 		RawResponse:      raw,
 	}, nil
+}
+
+// FetchCreditReportPDF calls Surepass credit-report-cibil/fetch-report-pdf.
+// Returns the S3 presigned URL for the CIBIL PDF report.
+func (c *SurepassClient) FetchCreditReportPDF(ctx context.Context, mobile, pan, name, gender string) (pdfURL string, clientID string, err error) {
+	if gender == "" {
+		gender = "male"
+	}
+	raw, err := c.postCIBIL(ctx, "/credit-report-cibil/fetch-report-pdf", cibilRequest{
+		Mobile:  mobile,
+		PAN:     pan,
+		Name:    name,
+		Gender:  gender,
+		Consent: "Y",
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("cibil pdf request: %w", err)
+	}
+
+	var resp surepassCIBILPDFResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", "", fmt.Errorf("cibil pdf parse: %w", err)
+	}
+
+	if !resp.Success {
+		return "", "", fmt.Errorf("cibil pdf failed: status_code=%d", resp.StatusCode)
+	}
+
+	return resp.Data.CreditReportLink, resp.Data.ClientID, nil
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-// namesMatch does a simple fuzzy match between two names.
-// Production should use a more robust string similarity algorithm.
+// namesMatch performs a robust token-overlap match between two names.
 func namesMatch(a, b string) bool {
 	a = strings.ToUpper(strings.TrimSpace(a))
 	b = strings.ToUpper(strings.TrimSpace(b))
+	if a == "" || b == "" {
+		return false
+	}
 	if a == b {
 		return true
 	}
-	// Accept if one is a substring of the other (handles middle name cases)
-	return strings.Contains(a, b) || strings.Contains(b, a)
+	if strings.Contains(a, b) || strings.Contains(b, a) {
+		return true
+	}
+
+	wordsA := strings.Fields(a)
+	wordsB := strings.Fields(b)
+	if len(wordsA) == 0 || len(wordsB) == 0 {
+		return false
+	}
+
+	smaller, larger := wordsA, wordsB
+	if len(wordsA) > len(wordsB) {
+		smaller, larger = wordsB, wordsA
+	}
+
+	matchCount := 0
+	for _, sw := range smaller {
+		for _, lw := range larger {
+			if sw == lw || strings.HasPrefix(lw, sw) || strings.HasPrefix(sw, lw) {
+				matchCount++
+				break
+			}
+		}
+	}
+
+	return matchCount >= len(smaller)
 }

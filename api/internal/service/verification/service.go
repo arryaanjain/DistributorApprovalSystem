@@ -51,7 +51,7 @@ func (s *Service) TriggerAll(ctx context.Context, applicationID, distributorID s
 
 	// ── PAN Verification ──────────────────────────────────────────────────
 	if docs != nil && docs.PAN != nil {
-		if err := s.triggerPAN(ctx, distributorID, appID, *docs.PAN, expectedName); err != nil {
+		if _, err := s.triggerPAN(ctx, distributorID, appID, *docs.PAN, expectedName); err != nil {
 			slog.Error("PAN verification failed", "error", err, "distributor_id", distributorID)
 		}
 	}
@@ -62,23 +62,24 @@ func (s *Service) TriggerAll(ctx context.Context, applicationID, distributorID s
 		if bp != nil {
 			bizName = bp.BusinessName
 		}
-		if err := s.triggerGST(ctx, distributorID, appID, *docs.GSTNumber, bizName); err != nil {
+		if _, err := s.triggerGST(ctx, distributorID, appID, *docs.GSTNumber, bizName); err != nil {
 			slog.Error("GST verification failed", "error", err, "distributor_id", distributorID)
 		}
 	}
 
-	// ── Bank Verification ─────────────────────────────────────────────────
-	bank, err := s.distRepo.GetBusinessProfile(ctx, distributorID)
-	if err == nil && bank != nil {
-		// Bank details are in bank_details table — re-query
-		if err := s.triggerBank(ctx, distributorID, appID, expectedName); err != nil {
-			slog.Error("bank verification failed", "error", err, "distributor_id", distributorID)
+	// ── Bank Verification (Optional) ──────────────────────────────────────
+	bankDetails, bErr := s.distRepo.GetBankDetails(ctx, distributorID)
+	if bErr == nil && bankDetails != nil && bankDetails.AccountNumber != "" && bankDetails.IFSC != "" {
+		if err := s.triggerBank(ctx, distributorID, appID, expectedName, bankDetails); err != nil {
+			slog.Warn("bank verification failed", "error", err, "distributor_id", distributorID)
 		}
+	} else {
+		slog.Info("skipping optional bank verification (no bank details provided)", "distributor_id", distributorID)
 	}
 
 	// ── Credit Report ─────────────────────────────────────────────────────
 	if docs != nil && docs.PAN != nil {
-		if err := s.triggerCreditReport(ctx, distributorID, appID, docs.PAN, &dist.Mobile); err != nil {
+		if err := s.triggerCreditReport(ctx, distributorID, appID, docs.PAN, &dist.Mobile, expectedName); err != nil {
 			slog.Error("credit report fetch failed", "error", err, "distributor_id", distributorID)
 		}
 	}
@@ -86,38 +87,43 @@ func (s *Service) TriggerAll(ctx context.Context, applicationID, distributorID s
 	return nil
 }
 
-func (s *Service) triggerPAN(ctx context.Context, distributorID string, appID *string, pan, expectedName string) error {
+func (s *Service) triggerPAN(ctx context.Context, distributorID string, appID *string, pan, expectedName string) (*PANResult, error) {
 	recID, err := s.verRepo.CreatePANVerification(ctx, distributorID, appID, pan)
 	if err != nil {
-		return err
+		slog.Warn("failed to create initial pan_verifications DB record", "error", err, "distributor_id", distributorID)
 	}
 
 	result, err := s.client.VerifyPAN(ctx, pan, expectedName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	raw, _ := json.Marshal(result.RawResponse)
+	raw := result.RawResponse
 	nameMatch := result.NameMatch
 	nameOnPAN := &result.NameOnPAN
 	provRef := &result.ProviderRef
 
-	return s.verRepo.UpdatePANVerification(ctx, recID,
-		repository.VerificationStatus(result.Status), nameOnPAN, nameMatch, raw, provRef)
+	if recID != "" {
+		if dbErr := s.verRepo.UpdatePANVerification(ctx, recID,
+			repository.VerificationStatus(result.Status), nameOnPAN, nameMatch, raw, provRef); dbErr != nil {
+			slog.Error("failed to update pan_verifications DB record", "error", dbErr, "distributor_id", distributorID)
+		}
+	}
+	return result, nil
 }
 
-func (s *Service) triggerGST(ctx context.Context, distributorID string, appID *string, gst, expectedName string) error {
+func (s *Service) triggerGST(ctx context.Context, distributorID string, appID *string, gst, expectedName string) (*GSTResult, error) {
 	recID, err := s.verRepo.CreateGSTVerification(ctx, distributorID, appID, gst)
 	if err != nil {
-		return err
+		slog.Warn("failed to create initial gst_verifications DB record", "error", err, "distributor_id", distributorID)
 	}
 
 	result, err := s.client.VerifyGST(ctx, gst, expectedName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	raw, _ := json.Marshal(result.RawResponse)
+	raw := result.RawResponse
 	legalName := &result.LegalName
 	tradeName := &result.TradeName
 	gstStatus := &result.GSTStatus
@@ -125,19 +131,23 @@ func (s *Service) triggerGST(ctx context.Context, distributorID string, appID *s
 	constitution := &result.Constitution
 	provRef := &result.ProviderRef
 
-	return s.verRepo.UpdateGSTVerification(ctx, recID,
-		repository.VerificationStatus(result.Status),
-		legalName, tradeName, result.RegistrationDate,
-		gstStatus, address, constitution, result.NameMatch, raw, provRef)
+	if recID != "" {
+		if dbErr := s.verRepo.UpdateGSTVerification(ctx, recID,
+			repository.VerificationStatus(result.Status),
+			legalName, tradeName, result.RegistrationDate,
+			gstStatus, address, constitution, result.NameMatch, raw, provRef); dbErr != nil {
+			slog.Error("failed to update gst_verifications DB record", "error", dbErr, "distributor_id", distributorID)
+		}
+	}
+	return result, nil
 }
 
-func (s *Service) triggerBank(ctx context.Context, distributorID string, appID *string, expectedName string) error {
-	bankDetails, err := s.distRepo.GetBankDetails(ctx, distributorID)
-	var accountNumber, ifsc string
-	if err == nil && bankDetails != nil {
-		accountNumber = bankDetails.AccountNumber
-		ifsc = bankDetails.IFSC
+func (s *Service) triggerBank(ctx context.Context, distributorID string, appID *string, expectedName string, bankDetails *repository.BankDetailRecord) error {
+	if bankDetails == nil || bankDetails.AccountNumber == "" || bankDetails.IFSC == "" {
+		return nil
 	}
+	accountNumber := bankDetails.AccountNumber
+	ifsc := bankDetails.IFSC
 
 	recID, err := s.verRepo.CreateBankVerification(ctx, distributorID, appID, accountNumber, ifsc)
 	if err != nil {
@@ -159,10 +169,10 @@ func (s *Service) triggerBank(ctx context.Context, distributorID string, appID *
 		holder, bankName, result.NameMatch, raw, provRef)
 }
 
-func (s *Service) triggerCreditReport(ctx context.Context, distributorID string, appID, pan, mobile *string) error {
+func (s *Service) triggerCreditReport(ctx context.Context, distributorID string, appID, pan, mobile *string, name string) error {
 	recID, err := s.verRepo.CreateCreditReport(ctx, distributorID, appID, pan, mobile)
 	if err != nil {
-		return err
+		slog.Warn("failed to create initial credit_reports DB record", "error", err, "distributor_id", distributorID)
 	}
 
 	panStr := ""
@@ -174,19 +184,35 @@ func (s *Service) triggerCreditReport(ctx context.Context, distributorID string,
 		mobileStr = *mobile
 	}
 
-	result, err := s.client.FetchCreditReport(ctx, mobileStr, panStr)
+	result, err := s.client.FetchCreditReport(ctx, mobileStr, panStr, name, "")
 	if err != nil {
-		return err
+		slog.Error("credit report API call failed", "error", err, "distributor_id", distributorID)
+		return nil
+	}
+	if result == nil {
+		return nil
 	}
 
-	raw, _ := json.Marshal(result.RawResponse)
-	pdfURL := &result.PDFURL
+	// Also fetch the PDF link
+	pdfURL := ""
+	if pdfLink, _, pdfErr := s.client.FetchCreditReportPDF(ctx, mobileStr, panStr, name, ""); pdfErr == nil {
+		pdfURL = pdfLink
+	}
+	result.PDFURL = pdfURL
+
+	raw := result.RawResponse
+	pdfPtr := &result.PDFURL
 	provRef := &result.ProviderRef
 
-	return s.verRepo.UpdateCreditReport(ctx, recID,
-		result.BureauScore, &result.HasDefaults, &result.HasWriteoffs, &result.HasSettlements,
-		&result.TotalActiveLoans, &result.DelinquencyCount, result.FraudFlag,
-		result.ReportDate, pdfURL, provRef, raw)
+	if recID != "" {
+		if dbErr := s.verRepo.UpdateCreditReport(ctx, recID,
+			result.BureauScore, &result.HasDefaults, &result.HasWriteoffs, &result.HasSettlements,
+			&result.TotalActiveLoans, &result.DelinquencyCount, result.FraudFlag,
+			result.ReportDate, pdfPtr, provRef, raw); dbErr != nil {
+			slog.Error("failed to update credit_reports DB record", "error", dbErr, "distributor_id", distributorID)
+		}
+	}
+	return nil
 }
 
 // GetResults returns all latest verification results for a distributor.
@@ -196,4 +222,83 @@ func (s *Service) GetResults(ctx context.Context, distributorID string) (*reposi
 		return nil, apperrors.Internal("fetching verification results", err)
 	}
 	return results, nil
+}
+
+// VerifyPANOnly triggers a PAN verification call (or returns cached result if already verified) and returns the normalized result.
+func (s *Service) VerifyPANOnly(ctx context.Context, distributorID, appID, pan, expectedName string) (*PANResult, error) {
+	// Re-use existing verification record if already verified for this exact PAN
+	latest, err := s.verRepo.GetLatestPANVerification(ctx, distributorID)
+	if err == nil && latest != nil && latest.PAN == pan && (latest.Status == repository.VerificationVerified || latest.Status == repository.VerificationMismatch) {
+		slog.Info("reusing cached PAN verification result (saving Surepass credits)", "distributor_id", distributorID, "pan", pan, "status", latest.Status)
+		nameOnPAN := ""
+		if latest.NameOnPAN != nil {
+			nameOnPAN = *latest.NameOnPAN
+		}
+		provRef := ""
+		if latest.ProviderRef != nil {
+			provRef = *latest.ProviderRef
+		}
+		return &PANResult{
+			Status:      Status(latest.Status),
+			NameOnPAN:   nameOnPAN,
+			NameMatch:   latest.NameMatch,
+			ProviderRef: provRef,
+		}, nil
+	}
+
+	var appPtr *string
+	if appID != "" {
+		appPtr = &appID
+	}
+	return s.triggerPAN(ctx, distributorID, appPtr, pan, expectedName)
+}
+
+// VerifyGSTOnly triggers a GST verification call (or returns cached result if already verified) and returns the normalized result.
+func (s *Service) VerifyGSTOnly(ctx context.Context, distributorID, appID, gst, expectedName string) (*GSTResult, error) {
+	// Re-use existing verification record if already verified for this exact GSTIN
+	latest, err := s.verRepo.GetLatestGSTVerification(ctx, distributorID)
+	if err == nil && latest != nil && latest.GSTNumber == gst && (latest.Status == repository.VerificationVerified || latest.Status == repository.VerificationMismatch || latest.Status == repository.VerificationPartiallyVerified) {
+		slog.Info("reusing cached GST verification result (saving Surepass credits)", "distributor_id", distributorID, "gst", gst, "status", latest.Status)
+		legalName := ""
+		if latest.LegalName != nil {
+			legalName = *latest.LegalName
+		}
+		tradeName := ""
+		if latest.TradeName != nil {
+			tradeName = *latest.TradeName
+		}
+		gstStatus := ""
+		if latest.GSTStatus != nil {
+			gstStatus = *latest.GSTStatus
+		}
+		address := ""
+		if latest.Address != nil {
+			address = *latest.Address
+		}
+		constitution := ""
+		if latest.Constitution != nil {
+			constitution = *latest.Constitution
+		}
+		provRef := ""
+		if latest.ProviderRef != nil {
+			provRef = *latest.ProviderRef
+		}
+		return &GSTResult{
+			Status:           Status(latest.Status),
+			LegalName:        legalName,
+			TradeName:        tradeName,
+			RegistrationDate: latest.RegistrationDate,
+			GSTStatus:        gstStatus,
+			Address:          address,
+			Constitution:     constitution,
+			NameMatch:        latest.NameMatch,
+			ProviderRef:      provRef,
+		}, nil
+	}
+
+	var appPtr *string
+	if appID != "" {
+		appPtr = &appID
+	}
+	return s.triggerGST(ctx, distributorID, appPtr, gst, expectedName)
 }

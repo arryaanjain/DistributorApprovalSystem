@@ -87,7 +87,12 @@ func (c *SurepassClient) InitializeESignSession(ctx context.Context, req *ESignI
 		pageKey: {{X: req.SignX, Y: req.SignY}},
 	}
 	payload.Config.Reason = "Kresconet Distributor Credit Agreement Execution"
+	payload.Config.AcceptVirtualSign = true
+	payload.Config.TrackLocation = true
+	payload.Config.EnforceGeoLocation = true
 	payload.Config.AllowDownload = true
+	payload.Config.SkipOTP = true
+	payload.Config.SkipEmail = true
 
 	payload.PrefillOptions.FullName = req.FullName
 	payload.PrefillOptions.UserEmail = req.UserEmail
