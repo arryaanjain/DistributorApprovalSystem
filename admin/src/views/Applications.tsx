@@ -6,7 +6,8 @@ import {
   Building,
   FileText,
   Zap,
-  AlertCircle
+  AlertCircle,
+  Download
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useSearchParams } from 'react-router-dom';
@@ -110,17 +111,36 @@ export const Applications: React.FC = () => {
   };
 
   const handleTriggerAllVerifications = async () => {
-    const appId = appDetail?.application?.id || selectedApp?.id;
-    const distId = appDetail?.application?.distributor_id || selectedApp?.distributor_id;
-    if (!appId || !distId) return;
+    const appId =
+      appDetail?.application?.id ||
+      appDetail?.application?.ID ||
+      selectedApp?.id ||
+      selectedApp?.ID ||
+      searchParams.get('id');
+
+    const distId =
+      appDetail?.application?.distributor_id ||
+      appDetail?.application?.DistributorID ||
+      selectedApp?.distributor_id ||
+      selectedApp?.DistributorID ||
+      appDetail?.distributor?.id ||
+      appDetail?.distributor?.ID;
+
+    if (!appId || !distId) {
+      console.warn('Missing appId or distId:', { appId, distId, appDetail, selectedApp });
+      setActionMessage('Cannot trigger verification: Missing Application ID or Distributor ID.');
+      return;
+    }
     setActionLoading(true);
+    setActionMessage('Running Auto-Verification & Credit Scoring...');
     try {
       await api.triggerVerifications(appId, distId);
       await api.evaluateCredit(appId);
       setActionMessage('Verifications & Credit Evaluation triggered successfully!');
-      loadDetail(appId);
+      await loadDetail(appId);
     } catch (err: any) {
-      setActionMessage(`Verification trigger: ${err.message}`);
+      console.error('Verification trigger failed:', err);
+      setActionMessage(`Verification trigger: ${err.message || 'Unknown error'}`);
     } finally {
       setActionLoading(false);
     }
@@ -273,55 +293,139 @@ export const Applications: React.FC = () => {
                 </div>
 
                 {/* Surepass Verifications Matrix */}
-                <div className="glass-card p-4 rounded-xl space-y-3">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> Surepass Verification Engine Results
-                  </p>
+                {(() => {
+                  const panRec = appDetail.verifications?.pan || appDetail.verifications?.PAN;
+                  const gstRec = appDetail.verifications?.gst || appDetail.verifications?.GST;
+                  const bankRec = appDetail.verifications?.bank || appDetail.verifications?.Bank;
+                  const creditRec = appDetail.verifications?.credit_report || appDetail.verifications?.CreditReport;
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">PAN Verification</p>
-                      <p className="text-xs font-semibold text-emerald-400 mt-1">{appDetail.verifications?.pan?.Status || 'Verified'}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{appDetail.verifications?.pan?.NameOnPAN || 'Match'}</p>
-                    </div>
+                  const panStatus = panRec?.status || panRec?.Status;
+                  const panName = panRec?.name_on_pan || panRec?.NameOnPAN;
 
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">GST Verification</p>
-                      <p className="text-xs font-semibold text-emerald-400 mt-1">{appDetail.verifications?.gst?.Status || 'Active'}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{appDetail.verifications?.gst?.LegalName || 'Match'}</p>
-                    </div>
+                  const gstStatus = gstRec?.status || gstRec?.Status;
+                  const gstName = gstRec?.legal_name || gstRec?.LegalName;
 
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">Bank Verification</p>
-                      <p className="text-xs font-semibold text-emerald-400 mt-1">{appDetail.verifications?.bank?.Status || 'Verified'}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{appDetail.verifications?.bank?.BankName || 'Pennyless Verified'}</p>
-                    </div>
+                  const bankStatus = bankRec?.status || bankRec?.Status;
+                  const bankName = bankRec?.bank_name || bankRec?.BankName;
 
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">CIBIL Score</p>
-                      <p className="text-xs font-semibold text-indigo-400 mt-1">{appDetail.verifications?.credit_report?.BureauScore || 750}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">No Defaults</p>
+                  const bureauScore = creditRec?.bureau_score ?? creditRec?.BureauScore;
+                  const pdfUrl = creditRec?.pdf_url || creditRec?.PDFURL;
+                  const hasDefaults = creditRec?.has_defaults ?? creditRec?.HasDefaults;
+                  const hasScore = bureauScore !== undefined && bureauScore !== null && bureauScore > 0;
+
+                  const decisionScore = appDetail.decision?.total_score ?? appDetail.decision?.TotalScore;
+
+                  return (
+                    <div className="glass-card p-4 rounded-xl space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" /> Surepass Verification Engine Results
+                        </p>
+                        {!hasScore && !decisionScore && (
+                          <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium">
+                            Verification Pending
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">PAN Verification</p>
+                          <p className={`text-xs font-semibold mt-1 ${panStatus === 'verified' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            {panStatus || 'Not Run'}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 truncate">{panName || (panRec ? 'Verified' : 'Pending')}</p>
+                        </div>
+
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">GST Verification</p>
+                          <p className={`text-xs font-semibold mt-1 ${gstStatus === 'verified' || gstStatus === 'partially_verified' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            {gstStatus || 'Not Run'}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 truncate">{gstName || (gstRec ? 'Active' : 'Pending')}</p>
+                        </div>
+
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">Bank Verification</p>
+                          <p className={`text-xs font-semibold mt-1 ${bankStatus === 'verified' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            {bankStatus || 'Not Run'}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 truncate">{bankName || (bankRec ? 'Penny Drop Verified' : 'Pending')}</p>
+                        </div>
+
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">Credit Score</p>
+                          {hasScore ? (
+                            <>
+                              <p className="text-sm font-black text-indigo-400 mt-1">{bureauScore}</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                {hasDefaults ? '⚠ Defaults' : '✓ No Defaults'}
+                              </p>
+                            </>
+                          ) : decisionScore !== undefined && decisionScore !== null ? (
+                            <>
+                              <p className="text-sm font-black text-indigo-400 mt-1">{decisionScore}</p>
+                              <p className="text-[10px] text-emerald-400 mt-0.5">Score Calculated</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-xs font-semibold text-slate-400 mt-1">Pending Run</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">Auto-Verify to Fetch</p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* PDF Report Download Action */}
+                      {pdfUrl && (
+                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                          <div className="text-[11px] text-slate-400">
+                            <span>Official CIBIL Credit Bureau Report (PDF)</span>
+                          </div>
+                          <a
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download Report PDF</span>
+                          </a>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Credit Sanction Recommendation */}
-                {appDetail.decision && (
-                  <div className="glass-card p-4 rounded-xl border border-indigo-500/30 bg-indigo-950/20">
-                    <p className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <IndianRupee className="w-4 h-4 text-indigo-400" /> Automated Risk & Credit Decision
-                    </p>
-                    <div className="flex items-center justify-between mt-3">
-                      <div>
-                        <p className="text-2xl font-black text-white">{formatINR(appDetail.decision.RecommendedLimitPaise || 5000000)}</p>
-                        <p className="text-xs text-indigo-300 mt-0.5">Credit Score: {appDetail.decision.TotalScore || 78} / 100 ({appDetail.decision.RiskGrade || 'A'})</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          {appDetail.decision.Decision || 'RECOMMEND_APPROVE'}
-                        </span>
+                {appDetail.decision ? (() => {
+                  const limit = appDetail.decision.approved_limit_paise ?? appDetail.decision.ApprovedLimitPaise ?? appDetail.decision.RecommendedLimitPaise;
+                  const score = appDetail.decision.total_score ?? appDetail.decision.TotalScore;
+                  const grade = appDetail.decision.risk_grade ?? appDetail.decision.RiskGrade;
+                  const dec = appDetail.decision.decision ?? appDetail.decision.Decision;
+
+                  return (
+                    <div className="glass-card p-4 rounded-xl border border-indigo-500/30 bg-indigo-950/20">
+                      <p className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <IndianRupee className="w-4 h-4 text-indigo-400" /> Automated Risk & Credit Decision
+                      </p>
+                      <div className="flex items-center justify-between mt-3">
+                        <div>
+                          <p className="text-2xl font-black text-white">{formatINR(limit)}</p>
+                          <p className="text-xs text-indigo-300 mt-0.5">Credit Score: {score} / 100 ({grade})</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {dec}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                  );
+                })() : (
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 text-center">
+                    <p className="text-xs text-slate-400">Automated credit limit evaluation pending.</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Click <strong>Auto-Verify & Score</strong> above to run verification and generate credit offer decision.</p>
                   </div>
                 )}
 

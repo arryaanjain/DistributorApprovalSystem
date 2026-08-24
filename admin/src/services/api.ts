@@ -100,12 +100,12 @@ export const api = {
 
   // Verification & Credit Auto-Trigger
   triggerVerifications: (appId: string, distId: string) =>
-    request<any>(`/verifications/trigger-all?application_id=${appId}&distributor_id=${distId}`, {
+    request<any>(`/verification/${appId}/trigger?distributor_id=${distId}`, {
       method: 'POST',
     }),
 
   evaluateCredit: (appId: string) =>
-    request<any>(`/credit/evaluate?application_id=${appId}`, {
+    request<any>(`/credit/${appId}/evaluate`, {
       method: 'POST',
     }),
 
