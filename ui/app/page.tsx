@@ -90,6 +90,13 @@ export default function DistributorPortal() {
     udyam_number: "",
     shop_est_number: "",
   });
+  const [step5Warnings, setStep5Warnings] = useState<string[]>([]);
+  const [verificationResults, setVerificationResults] = useState<{
+    panVerified?: boolean;
+    gstVerified?: boolean;
+    panHolderName?: string;
+    gstLegalName?: string;
+  }>({});
 
   const [step6, setStep6] = useState<Step6Data>({
     authorized: false,
@@ -393,13 +400,39 @@ export default function DistributorPortal() {
     setErrorMsg(null);
     setLoading(true);
 
-    const res = await fetchApi<unknown>("/onboarding/statutory", {
+    const res = await fetchApi<{
+      pan_verified?: boolean;
+      gst_verified?: boolean;
+      pan_holder_name?: string;
+      gst_legal_name?: string;
+      warnings?: string[];
+    }>("/onboarding/statutory", {
       method: "POST",
       body: JSON.stringify(step5),
     });
 
     setLoading(false);
     if (res.success) {
+      setVerificationResults({
+        panVerified: res.data?.pan_verified,
+        gstVerified: res.data?.gst_verified,
+        panHolderName: res.data?.pan_holder_name,
+        gstLegalName: res.data?.gst_legal_name,
+      });
+
+      const warnings = res.data?.warnings || [];
+      setStep5Warnings(warnings);
+
+      const isPanOK = res.data?.pan_verified === true;
+      const isGstOK = !step5.has_gst || res.data?.gst_verified === true;
+      const hasWarnings = warnings.length > 0;
+
+      // Gate Guard: Stop user on Step 5 if verification fails or warnings/mismatches exist
+      if (!isPanOK || !isGstOK || hasWarnings) {
+        setErrorMsg("KYC / GST verification failed or discrepancies detected. Please resolve errors before proceeding.");
+        return;
+      }
+
       setStep("step6_auth");
     } else {
       setErrorMsg(res.error?.message || "Failed to submit KYC & GST details");
@@ -561,6 +594,10 @@ export default function DistributorPortal() {
             loading={loading}
             onBack={() => setStep("step4_order_req")}
             onSubmit={handleStep5Submit}
+            verificationWarnings={step5Warnings}
+            verificationResults={verificationResults}
+            step1Name={step1.name}
+            step1BusinessName={step1.business_name}
           />
         )}
 
