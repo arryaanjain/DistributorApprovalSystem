@@ -8,14 +8,6 @@ export function setAuthToken(token: string) {
   localStorage.setItem('kresconet_admin_token', token);
 }
 
-export function getRefreshToken(): string | null {
-  return localStorage.getItem('kresconet_admin_refresh_token');
-}
-
-export function setRefreshToken(token: string) {
-  localStorage.setItem('kresconet_admin_refresh_token', token);
-}
-
 export function clearAuthToken() {
   localStorage.removeItem('kresconet_admin_token');
   localStorage.removeItem('kresconet_admin_refresh_token');
@@ -36,46 +28,41 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   let res = await fetch(`${API_BASE}${path}`, {
     ...options,
+    credentials: 'include',
     headers,
   });
 
   if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh') && !isRefreshing) {
-    const refreshToken = getRefreshToken();
-    if (refreshToken) {
-      isRefreshing = true;
-      try {
-        const refreshRes = await fetch(`${API_BASE}/auth/employee/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+    isRefreshing = true;
+    try {
+      const refreshRes = await fetch(`${API_BASE}/auth/employee/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const refreshData = await refreshRes.json();
+      isRefreshing = false;
+      if (refreshRes.ok && (refreshData.access_token || refreshData.token)) {
+        const newAccess = refreshData.access_token || refreshData.token;
+        setAuthToken(newAccess);
+        headers['Authorization'] = `Bearer ${newAccess}`;
+        res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          credentials: 'include',
+          headers,
         });
-        const refreshData = await refreshRes.json();
-        isRefreshing = false;
-        if (refreshRes.ok && (refreshData.access_token || refreshData.token)) {
-          const newAccess = refreshData.access_token || refreshData.token;
-          setAuthToken(newAccess);
-          headers['Authorization'] = `Bearer ${newAccess}`;
-          res = await fetch(`${API_BASE}${path}`, {
-            ...options,
-            headers,
-          });
-        } else {
-          clearAuthToken();
-          localStorage.removeItem('kresconet_admin_user');
-          window.location.href = '/';
-          throw new Error('Session expired. Please log in again.');
-        }
-      } catch (err) {
-        isRefreshing = false;
+      } else {
         clearAuthToken();
         localStorage.removeItem('kresconet_admin_user');
         window.location.href = '/';
-        throw err;
+        throw new Error('Session expired. Please log in again.');
       }
-    } else {
+    } catch (err) {
+      isRefreshing = false;
       clearAuthToken();
       localStorage.removeItem('kresconet_admin_user');
       window.location.href = '/';
+      throw err;
     }
   }
 
@@ -92,15 +79,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   // Auth
   login: (password: string) =>
-    request<{ access_token: string; token?: string; refresh_token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
+    request<{ access_token: string; token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
       method: 'POST',
-      body: JSON.stringify({ email: 'kresconet@gmail.com', password }),
+      body: JSON.stringify({ email: 'admin@kresconet.com', password }),
     }),
 
   loginWithCredentials: (email: string, password: string) =>
-    request<{ access_token: string; token?: string; refresh_token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
+    request<{ access_token: string; token?: string; user: { id: string; name: string; role: string } }>('/auth/employee/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    }),
+
+  logout: () =>
+    request('/auth/logout', {
+      method: 'POST',
     }),
 
   // Products & Sample Catalogue

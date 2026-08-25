@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getAuthToken, setAuthToken, clearAuthToken } from '../services/api';
+import { api, getAuthToken, setAuthToken, clearAuthToken } from '../services/api';
 
 interface AuthUser {
   id: string;
@@ -28,7 +28,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (token) {
       setIsAuthenticated(true);
     } else {
-      setIsAuthenticated(false);
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1';
+      fetch(`${apiBase}/auth/employee/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          const newAccess = data.access_token || data.token;
+          if (newAccess) {
+            setAuthToken(newAccess);
+            if (data.user) {
+              setUser(data.user);
+              localStorage.setItem('kresconet_admin_user', JSON.stringify(data.user));
+            }
+            setIsAuthenticated(true);
+          } else {
+            setIsAuthenticated(false);
+          }
+        })
+        .catch(() => setIsAuthenticated(false));
     }
   }, []);
 
@@ -40,6 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    api.logout().catch(() => {});
     clearAuthToken();
     setUser(null);
     localStorage.removeItem('kresconet_admin_user');
