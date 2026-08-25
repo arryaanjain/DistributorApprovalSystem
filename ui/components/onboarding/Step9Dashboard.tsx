@@ -1,16 +1,19 @@
 import React from "react";
 import { ProductItem, AppStatus } from "@/types/onboarding";
+import { LogOut } from "lucide-react";
 
 interface Step9DashboardProps {
   trialActivated: boolean;
   regularProducts: ProductItem[];
   appStatus?: AppStatus | null;
+  onSignOut?: () => void;
 }
 
 export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
   trialActivated,
   regularProducts,
   appStatus,
+  onSignOut,
 }) => {
   const creditLimitPaise = appStatus?.assigned_credit_limit;
   const isApprovedCredit =
@@ -44,7 +47,7 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex items-center gap-4">
           <div className="bg-slate-900/80 px-6 py-4 rounded-2xl border border-slate-800 text-center">
             <div className="text-xs text-slate-400">Available Credit</div>
             <div className="text-xl font-extrabold text-emerald-400 mt-1">
@@ -56,6 +59,17 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
             <div className="text-xs text-slate-400">Active Orders</div>
             <div className="text-xl font-extrabold text-white mt-1">1</div>
           </div>
+
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              type="button"
+              className="px-4 py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-2xl text-xs font-semibold transition-all flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sign Out</span>
+            </button>
+          )}
         </div>
       </div>
 

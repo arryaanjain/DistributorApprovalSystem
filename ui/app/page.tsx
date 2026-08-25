@@ -113,6 +113,21 @@ export default function DistributorPortal() {
 
   const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
 
+  useEffect(() => {
+    const savedToken = typeof window !== "undefined" ? localStorage.getItem("kresconet_token") : null;
+    const savedDistId = typeof window !== "undefined" ? localStorage.getItem("kresconet_dist_id") : null;
+
+    if (savedToken) {
+      setToken(savedToken);
+    }
+    if (savedDistId) {
+      setDistributorId(savedDistId);
+    }
+
+    // Restore application status and step on page refresh
+    loadApplicationStatus();
+  }, []);
+
   const loadApplicationStatus = async () => {
     setLoading(true);
     const res = await fetchApi<AppStatus>("/onboarding/status");
@@ -148,7 +163,11 @@ export default function DistributorPortal() {
         setStep("step1_business_det");
       }
     } else {
-      setStep("step1_business_det");
+      if (res.error?.code === "UNAUTHORIZED" || !localStorage.getItem("kresconet_token")) {
+        setStep("auth");
+      } else {
+        setStep("step1_business_det");
+      }
     }
 
     fetchCatalogues();
@@ -218,12 +237,16 @@ export default function DistributorPortal() {
     }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      await fetchApi("/auth/logout", { method: "POST" });
+    } catch {}
     localStorage.removeItem("kresconet_token");
     localStorage.removeItem("kresconet_refresh_token");
     localStorage.removeItem("kresconet_dist_id");
     setToken(null);
     setDistributorId(null);
+    setAppStatus(null);
     setStep("auth");
   };
 
@@ -659,6 +682,7 @@ export default function DistributorPortal() {
             trialActivated={trialActivated}
             regularProducts={regularProducts}
             appStatus={appStatus}
+            onSignOut={handleSignOut}
           />
         )}
       </main>

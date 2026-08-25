@@ -1,5 +1,5 @@
 import React from "react";
-import { Building2, ShieldCheck } from "lucide-react";
+import { Building2, ShieldCheck, LogOut } from "lucide-react";
 
 interface OnboardingHeaderProps {
   token: string | null;
@@ -26,7 +26,7 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
         </div>
 
         {token && (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <a
               href="/admin"
               target="_blank"
@@ -37,9 +37,11 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
             </a>
             <button
               onClick={onSignOut}
-              className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
+              type="button"
+              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
             >
-              Sign Out
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
             </button>
           </div>
         )}

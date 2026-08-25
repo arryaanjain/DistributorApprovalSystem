@@ -36,6 +36,7 @@ export async function fetchApi<T>(
   try {
     let res = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
+      credentials: "include",
       headers,
     });
 
@@ -46,39 +47,37 @@ export async function fetchApi<T>(
       !isRefreshing &&
       typeof window !== "undefined"
     ) {
-      const refreshToken = localStorage.getItem("kresconet_refresh_token");
-      if (refreshToken) {
-        isRefreshing = true;
-        try {
-          const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: refreshToken }),
+      isRefreshing = true;
+      try {
+        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        });
+        const refreshData = await refreshRes.json();
+        isRefreshing = false;
+
+        const newToken =
+          refreshData.access_token ||
+          refreshData.token ||
+          (refreshData.data && (refreshData.data.access_token || refreshData.data.token));
+
+        if (refreshRes.ok && newToken) {
+          localStorage.setItem("kresconet_token", newToken);
+          headers["Authorization"] = `Bearer ${newToken}`;
+          res = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            credentials: "include",
+            headers,
           });
-          const refreshData = await refreshRes.json();
-          isRefreshing = false;
-
-          const newToken =
-            refreshData.access_token ||
-            refreshData.token ||
-            (refreshData.data && (refreshData.data.access_token || refreshData.data.token));
-
-          if (refreshRes.ok && newToken) {
-            localStorage.setItem("kresconet_token", newToken);
-            headers["Authorization"] = `Bearer ${newToken}`;
-            res = await fetch(`${API_BASE}${endpoint}`, {
-              ...options,
-              headers,
-            });
-          } else {
-            localStorage.removeItem("kresconet_token");
-            localStorage.removeItem("kresconet_refresh_token");
-          }
-        } catch {
-          isRefreshing = false;
+        } else {
           localStorage.removeItem("kresconet_token");
           localStorage.removeItem("kresconet_refresh_token");
         }
+      } catch {
+        isRefreshing = false;
+        localStorage.removeItem("kresconet_token");
+        localStorage.removeItem("kresconet_refresh_token");
       }
     }
 
