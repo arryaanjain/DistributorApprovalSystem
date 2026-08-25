@@ -293,6 +293,17 @@ func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string)
 	return s.RefreshToken(ctx, refreshToken)
 }
 
+// Logout revokes a refresh token in the database.
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	if refreshToken == "" {
+		return nil
+	}
+	if s.refreshTokenRepo != nil {
+		return s.refreshTokenRepo.Revoke(ctx, refreshToken)
+	}
+	return nil
+}
+
 func (s *Service) issueEmployeeToken(userID, email, role string, expiry time.Duration) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{

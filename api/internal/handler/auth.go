@@ -82,6 +82,17 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if result.RefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    result.RefreshToken,
+			Path:     "/api/v1/auth",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   30 * 86400,
+		})
+	}
+
 	response.JSON(w, map[string]interface{}{
 		"token":          result.Token,
 		"refresh_token": result.RefreshToken,
@@ -114,6 +125,17 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if result.RefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    result.RefreshToken,
+			Path:     "/api/v1/auth",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   30 * 86400,
+		})
+	}
+
 	response.JSON(w, map[string]interface{}{
 		"access_token":  result.AccessToken,
 		"refresh_token": result.RefreshToken,
@@ -124,17 +146,27 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/v1/auth/refresh & /api/v1/auth/employee/refresh ────────────────
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token" validate:"required"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.BadRequest(w, "invalid request body")
+	refreshTokenStr := ""
+	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
+	}
+	if refreshTokenStr == "" {
+		var req refreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			refreshTokenStr = req.RefreshToken
+		}
+	}
+
+	if refreshTokenStr == "" {
+		response.Unauthorized(w, "missing refresh token")
 		return
 	}
 
-	accessToken, err := h.svc.RefreshToken(r.Context(), req.RefreshToken)
+	accessToken, err := h.svc.RefreshToken(r.Context(), refreshTokenStr)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -148,6 +180,35 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
 	h.RefreshToken(w, r)
+}
+
+// ─── POST /api/v1/auth/logout ─────────────────────────────────────────────────
+
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	refreshTokenStr := ""
+	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
+	}
+	if refreshTokenStr == "" {
+		var req refreshRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		refreshTokenStr = req.RefreshToken
+	}
+
+	if refreshTokenStr != "" {
+		_ = h.svc.Logout(r.Context(), refreshTokenStr)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/api/v1/auth",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+
+	response.JSON(w, map[string]string{"message": "logged out successfully"})
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
