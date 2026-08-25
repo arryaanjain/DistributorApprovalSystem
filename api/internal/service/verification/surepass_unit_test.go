@@ -87,7 +87,7 @@ func TestSurepassUnit_GST(t *testing.T) {
 	defer mockServer.Close()
 
 	client := NewSurepassClient(mockServer.URL, mockServer.URL, "test_token", "test_token")
-	res, err := client.VerifyGST(context.Background(), "08AKWPJ1234H1ZN", "MINDA MARWAR PRODUCER COMPANY")
+	res, err := client.VerifyGST(context.Background(), "08AKWPJ1234H1ZN", "MADAN LAL JAT", "MINDA MARWAR PRODUCER COMPANY")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -221,7 +222,7 @@ func (c *SurepassClient) VerifyPAN(ctx context.Context, pan, expectedName string
 	if resp.Data.Status != "" && resp.Data.Status != "valid" {
 		status = StatusFailed
 	} else if expectedName != "" {
-		nameMatch = namesMatch(resp.Data.FullName, expectedName)
+		nameMatch = NamesMatch(resp.Data.FullName, expectedName)
 		if !nameMatch {
 			status = StatusMismatch
 		}
@@ -266,7 +267,7 @@ type surepassGSTResponse struct {
 }
 
 // VerifyGST calls Surepass corporate/gstin and returns a normalized GSTResult.
-func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedName string) (*GSTResult, error) {
+func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedUserName, expectedBizName string) (*GSTResult, error) {
 	raw, err := c.post(ctx, "/corporate/gstin", gstRequest{IDNumber: gstin})
 	if err != nil {
 		return &GSTResult{Status: StatusUnavailable, RawResponse: raw}, nil
@@ -288,9 +289,11 @@ func (c *SurepassClient) VerifyGST(ctx context.Context, gstin, expectedName stri
 	}
 
 	nameMatch := false
-	if expectedName != "" {
-		nameMatch = namesMatch(resp.Data.LegalName, expectedName) ||
-			namesMatch(resp.Data.BusinessName, expectedName)
+	if expectedUserName != "" || expectedBizName != "" {
+		nameMatch = NamesMatch(resp.Data.LegalName, expectedUserName) ||
+			NamesMatch(resp.Data.LegalName, expectedBizName) ||
+			NamesMatch(resp.Data.BusinessName, expectedUserName) ||
+			NamesMatch(resp.Data.BusinessName, expectedBizName)
 		if !nameMatch {
 			status = StatusMismatch
 		}
@@ -501,15 +504,16 @@ func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan, nam
 			var curBal float64
 			fmt.Sscanf(acct.CurrentBalance, "%f", &curBal)
 
-			if overdueAmt > 0 {
+			if overdueAmt >= 5000 {
 				delinquencies++
 				hasDefaults = true
 			}
-			// Check payment history for write-offs and settlements
-			if strings.Contains(acct.PaymentHistory, "WOF") || acct.DateClosed == "NA" && overdueAmt > 0 {
+			// Check payment history for genuine write-offs (WOF)
+			history := strings.ToUpper(acct.PaymentHistory)
+			if strings.Contains(history, "WOF") || strings.Contains(history, "WRITE") {
 				hasWriteoffs = true
 			}
-			if strings.Contains(acct.PaymentHistory, "SET") {
+			if strings.Contains(history, "SET") || strings.Contains(history, "SETTLE") {
 				hasSettlements = true
 			}
 			totalLoans += int64(curBal * 100) // convert to paise
@@ -571,8 +575,45 @@ func (c *SurepassClient) FetchCreditReportPDF(ctx context.Context, mobile, pan, 
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-// namesMatch performs a robust token-overlap match between two names.
-func namesMatch(a, b string) bool {
+// levenshteinDistance computes edit distance between two strings
+func levenshteinDistance(s1, s2 string) int {
+	r1, r2 := []rune(s1), []rune(s2)
+	n1, n2 := len(r1), len(r2)
+	if n1 == 0 {
+		return n2
+	}
+	if n2 == 0 {
+		return n1
+	}
+	matrix := make([][]int, n1+1)
+	for i := range matrix {
+		matrix[i] = make([]int, n2+1)
+		matrix[i][0] = i
+	}
+	for j := 0; j <= n2; j++ {
+		matrix[0][j] = j
+	}
+	for i := 1; i <= n1; i++ {
+		for j := 1; j <= n2; j++ {
+			cost := 0
+			if r1[i-1] != r2[j-1] {
+				cost = 1
+			}
+			min := matrix[i-1][j] + 1
+			if matrix[i][j-1]+1 < min {
+				min = matrix[i][j-1] + 1
+			}
+			if matrix[i-1][j-1]+cost < min {
+				min = matrix[i-1][j-1] + cost
+			}
+			matrix[i][j] = min
+		}
+	}
+	return matrix[n1][n2]
+}
+
+// NamesMatch performs a robust, case-insensitive token, abbreviation, and edit distance match.
+func NamesMatch(a, b string) bool {
 	a = strings.ToUpper(strings.TrimSpace(a))
 	b = strings.ToUpper(strings.TrimSpace(b))
 	if a == "" || b == "" {
@@ -585,26 +626,78 @@ func namesMatch(a, b string) bool {
 		return true
 	}
 
-	wordsA := strings.Fields(a)
-	wordsB := strings.Fields(b)
+	reg := regexp.MustCompile(`[^A-Z0-9\s]`)
+	cleanA := reg.ReplaceAllString(a, "")
+	cleanB := reg.ReplaceAllString(b, "")
+	if cleanA == cleanB || strings.Contains(cleanA, cleanB) || strings.Contains(cleanB, cleanA) {
+		return true
+	}
+
+	normalizeWord := func(w string) string {
+		switch w {
+		case "PVT", "PVTLTD":
+			return "PRIVATE"
+		case "LTD":
+			return "LIMITED"
+		case "AGENCY", "AGENCIES":
+			return "AGENCY"
+		case "ENTERPRISE", "ENTERPRISES":
+			return "ENTERPRISE"
+		case "TRADER", "TRADERS":
+			return "TRADER"
+		case "STORE", "STORES":
+			return "STORE"
+		case "DISTRIBUTOR", "DISTRIBUTORS":
+			return "DISTRIBUTOR"
+		case "SUPPLIER", "SUPPLIERS":
+			return "SUPPLIER"
+		default:
+			return w
+		}
+	}
+
+	wordsA := strings.Fields(cleanA)
+	wordsB := strings.Fields(cleanB)
 	if len(wordsA) == 0 || len(wordsB) == 0 {
 		return false
 	}
 
-	smaller, larger := wordsA, wordsB
-	if len(wordsA) > len(wordsB) {
-		smaller, larger = wordsB, wordsA
+	var fullA, fullB []string
+	for _, w := range wordsA {
+		if len(w) > 1 {
+			fullA = append(fullA, normalizeWord(w))
+		}
 	}
-
-	matchCount := 0
-	for _, sw := range smaller {
-		for _, lw := range larger {
-			if sw == lw || strings.HasPrefix(lw, sw) || strings.HasPrefix(sw, lw) {
-				matchCount++
-				break
-			}
+	for _, w := range wordsB {
+		if len(w) > 1 {
+			fullB = append(fullB, normalizeWord(w))
 		}
 	}
 
-	return matchCount >= len(smaller)
+	if len(fullA) > 0 && len(fullB) > 0 {
+		smaller, larger := fullA, fullB
+		if len(fullA) > len(fullB) {
+			smaller, larger = fullB, fullA
+		}
+
+		matches := 0
+		for _, sw := range smaller {
+			for _, lw := range larger {
+				if sw == lw || strings.HasPrefix(lw, sw) || strings.HasPrefix(sw, lw) || (len(sw) >= 4 && len(lw) >= 4 && levenshteinDistance(sw, lw) <= 2) {
+					matches++
+					break
+				}
+			}
+		}
+
+		requiredMatches := len(smaller)
+		if len(smaller) >= 2 {
+			requiredMatches = 2
+		}
+		if matches >= requiredMatches {
+			return true
+		}
+	}
+
+	return false
 }
