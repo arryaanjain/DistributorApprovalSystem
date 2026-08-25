@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Lock, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { api, setRefreshToken } from '../services/api';
 
 export const Login: React.FC = () => {
   const { login } = useAuth();
@@ -22,6 +22,9 @@ export const Login: React.FC = () => {
       const data = await api.loginWithCredentials(email, password);
       const token = data.access_token || data.token;
       if (token) {
+        if (data.refresh_token) {
+          setRefreshToken(data.refresh_token);
+        }
         login(token, data.user || { id: 'EMP-ADMIN', name: 'Kresconet Admin', role: 'super_admin' });
       } else {
         setError('Authentication failed. No access token received.');

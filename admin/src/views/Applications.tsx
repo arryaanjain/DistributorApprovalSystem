@@ -22,6 +22,8 @@ export const Applications: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string>('');
+  const [overrideLimit, setOverrideLimit] = useState<string>('');
+  const [overrideDays, setOverrideDays] = useState<number>(15);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -54,6 +56,11 @@ export const Applications: React.FC = () => {
       if (data && data.application) {
         setAppDetail(data);
         setSelectedApp(data.application);
+        if (data.decision) {
+          const recPaise = data.decision.approved_limit_paise ?? data.decision.ApprovedLimitPaise ?? data.decision.RecommendedLimitPaise ?? 0;
+          setOverrideLimit((recPaise / 100).toString());
+          setOverrideDays(data.decision.approved_period_days ?? data.decision.ApprovedPeriodDays ?? 15);
+        }
       } else {
         setActionMessage(`Application #${appId} not found or details empty.`);
       }
@@ -69,8 +76,9 @@ export const Applications: React.FC = () => {
     if (!selectedApp) return;
     setActionLoading(true);
     try {
-      await api.approveApplication(selectedApp.id, 'Approved via Admin Dashboard review');
-      setActionMessage('Application successfully approved! Credit decision & offer generated.');
+      const parsedLimitPaise = overrideLimit !== '' ? Math.max(0, Math.round(Number(overrideLimit) * 100)) : undefined;
+      await api.approveApplication(selectedApp.id, 'Approved via Admin Dashboard review', parsedLimitPaise, overrideDays);
+      setActionMessage('Application successfully approved & completed with granted credit limit!');
       loadDetail(selectedApp.id);
       loadApplications();
     } catch (err: any) {
@@ -214,8 +222,16 @@ export const Applications: React.FC = () => {
                     </div>
                     <p className="text-xs text-slate-400 mt-1 truncate">{app.business_name || 'Business Name Pending'}</p>
                     <div className="flex items-center justify-between mt-3">
-                      <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">
-                        {app.status.replace('_', ' ')}
+                      <span className="text-[10px] uppercase tracking-wider font-semibold">
+                        {['offer_generated', 'offer_accepted', 'agreement_pending', 'agreement_signed', 'approved', 'credit_active'].includes(app.status) ? (
+                          <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Completed</span>
+                        ) : app.status === 'advance_only' ? (
+                          <span className="text-sky-400 font-bold bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">Advance Only</span>
+                        ) : app.status === 'rejected' || app.status === 'blocked' ? (
+                          <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full">Rejected</span>
+                        ) : (
+                          <span className="text-slate-400">{app.status.replace('_', ' ')}</span>
+                        )}
                       </span>
                       <span className="text-[11px] text-slate-500">
                         {new Date(app.created_at).toLocaleDateString()}
@@ -245,7 +261,7 @@ export const Applications: React.FC = () => {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 text-xs font-semibold border border-violet-500/30 transition-colors"
                 >
                   <Zap className="w-3.5 h-3.5 text-violet-400" />
-                  <span>Auto-Verify & Score</span>
+                  <span>{appDetail?.decision ? 'Recompute Decision' : 'Auto-Verify & Score'}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -397,28 +413,134 @@ export const Applications: React.FC = () => {
                   );
                 })()}
 
-                {/* Credit Sanction Recommendation */}
+                {/* Credit Sanction Recommendation & Compute Mechanics */}
                 {appDetail.decision ? (() => {
                   const limit = appDetail.decision.approved_limit_paise ?? appDetail.decision.ApprovedLimitPaise ?? appDetail.decision.RecommendedLimitPaise;
-                  const score = appDetail.decision.total_score ?? appDetail.decision.TotalScore;
-                  const grade = appDetail.decision.risk_grade ?? appDetail.decision.RiskGrade;
-                  const dec = appDetail.decision.decision ?? appDetail.decision.Decision;
+                  const score = appDetail.decision.total_score ?? appDetail.decision.TotalScore ?? 0;
+                  const grade = appDetail.decision.risk_grade ?? appDetail.decision.RiskGrade ?? 'A';
+                  const dec = appDetail.decision.decision ?? appDetail.decision.Decision ?? 'ADVANCE_ONLY';
+                  const hardRisk = appDetail.decision.hard_risk_triggered ?? appDetail.decision.HardRiskTriggered ?? false;
+                  const flags: string[] = appDetail.risk_flags || [];
+                  const scoreComps: Record<string, number> = appDetail.score_components || {};
+
+                  // Helper flag descriptions
+                  const getFlagDesc = (flag: string) => {
+                    switch (flag) {
+                      case 'CREDIT_BUREAU_DEFAULT':
+                        return 'CIBIL Bureau Score < 700 with reported credit default / delinquency. Credit hard-limited to ₹0 (ADVANCE_ONLY).';
+                      case 'CREDIT_BUREAU_WRITEOFF':
+                        return 'CIBIL Bureau report indicates historical loan write-offs. Credit blocked.';
+                      case 'BUREAU_FRAUD_FLAG':
+                        return 'Bureau fraud indicator flagged on credit report.';
+                      case 'INVALID_PAN_IDENTITY':
+                        return 'PAN identity verification with tax authority failed or mismatched.';
+                      case 'BANK_VERIFICATION_FAILED':
+                        return 'Bank account verification failed or name mismatch.';
+                      case 'DUPLICATE_APPLICATION_SUSPECT':
+                        return 'Suspected duplicate application submission.';
+                      default:
+                        return 'Hard risk rule triggered by automated decision engine.';
+                    }
+                  };
+
+                  const compLabels: Record<string, { label: string; max: number }> = {
+                    credit_risk: { label: 'CIBIL Credit Risk', max: 30 },
+                    identity_kyc: { label: 'PAN Identity / KYC', max: 15 },
+                    business_verification: { label: 'GST / Biz Verification', max: 15 },
+                    business_vintage: { label: 'Business Vintage', max: 10 },
+                    fmcg_experience: { label: 'FMCG / Dist. Experience', max: 10 },
+                    business_capacity: { label: 'Turnover Scale & Capacity', max: 10 },
+                    data_integrity: { label: 'Name / Data Consistency', max: 10 },
+                    brand_portfolio: { label: 'Brand Portfolio', max: 5 },
+                    compliance_credentials: { label: 'FSSAI / Udyam Credentials', max: 5 },
+                  };
 
                   return (
-                    <div className="glass-card p-4 rounded-xl border border-indigo-500/30 bg-indigo-950/20">
-                      <p className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <IndianRupee className="w-4 h-4 text-indigo-400" /> Automated Risk & Credit Decision
-                      </p>
-                      <div className="flex items-center justify-between mt-3">
+                    <div className="glass-card p-5 rounded-2xl border border-indigo-500/30 bg-slate-900/80 space-y-4">
+                      {/* Top Header Card */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                         <div>
-                          <p className="text-2xl font-black text-white">{formatINR(limit)}</p>
-                          <p className="text-xs text-indigo-300 mt-0.5">Credit Score: {score} / 100 ({grade})</p>
+                          <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <IndianRupee className="w-4 h-4 text-indigo-400" /> Automated Risk & Credit Decision
+                          </p>
+                          <p className="text-3xl font-black text-white mt-1">{formatINR(limit)}</p>
                         </div>
                         <div className="text-right">
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            {dec}
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
+                              dec === 'APPROVED'
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                : dec === 'ADVANCE_ONLY'
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            }`}
+                          >
+                            {dec} {hardRisk ? '(Hard Limited)' : ''}
                           </span>
+                          <p className="text-xs text-slate-400 mt-1.5 font-medium">
+                            Engine Total Score: <strong className="text-indigo-300">{score} / 100</strong> (Grade {grade})
+                          </p>
                         </div>
+                      </div>
+
+                      {/* Hard Risk Override Banner */}
+                      {(hardRisk || flags.length > 0) && (
+                        <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 space-y-2">
+                          <div className="flex items-center gap-2 text-xs font-bold text-amber-300 uppercase tracking-wider">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                            Hard Risk Override Triggered (Credit Capped at ₹0)
+                          </div>
+                          {flags.length > 0 ? (
+                            <ul className="space-y-1 pl-5 list-disc text-xs text-amber-200/90">
+                              {flags.map((f, idx) => (
+                                <li key={idx}>
+                                  <strong className="text-amber-100">{f}:</strong> {getFlagDesc(f)}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-amber-200/90">
+                              Automated risk rules detected critical credit flags (CIBIL defaults or tax mismatches). Line-of-credit is hard limited to Advance Payment only.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Compute Mechanics Score Parameter Breakdown */}
+                      {Object.keys(scoreComps).length > 0 && (
+                        <div className="pt-2">
+                          <p className="text-xs font-bold text-slate-300 mb-2.5 uppercase tracking-wider">
+                            Engine Compute Mechanics & Parameter Breakdown
+                          </p>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {Object.entries(scoreComps).map(([key, val]) => {
+                              const meta = compLabels[key] || { label: key, max: 15 };
+                              const pct = Math.min(100, Math.round((val / meta.max) * 100));
+                              return (
+                                <div key={key} className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                                  <div className="flex items-center justify-between text-[11px] font-medium text-slate-300 mb-1">
+                                    <span>{meta.label}</span>
+                                    <span className="font-bold text-indigo-300">{val} / {meta.max} pts</span>
+                                  </div>
+                                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                                    <div
+                                      className="bg-indigo-500 h-full rounded-full transition-all"
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Credit Calculation Logic Explanation */}
+                      <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/60 text-[11px] text-slate-400 space-y-1">
+                        <p className="font-semibold text-slate-300">Credit Determination Flow:</p>
+                        <p>• <strong>Turnover Base:</strong> Conservative 5%–10% of approx. monthly business turnover (capped by Risk Grade score band up to ₹1,50,000 max).</p>
+                        <p>• <strong>GST Non-GST Rule:</strong> Capped at max ₹25,000 line of credit if no valid GSTIN registered.</p>
+                        <p>• <strong>Hard Override Rule:</strong> If active defaults (&lt; 660 CIBIL), PAN mismatch, or fraud flags exist, credit is hard-capped to ₹0 (`ADVANCE_ONLY`).</p>
                       </div>
                     </div>
                   );
@@ -429,14 +551,48 @@ export const Applications: React.FC = () => {
                   </div>
                 )}
 
+                {/* Admin Manual Credit Limit & Terms Override Panel */}
+                <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <IndianRupee className="w-3.5 h-3.5 text-indigo-400" /> Admin Manual Credit Limit Override
+                    </p>
+                    <span className="text-[10px] text-slate-400">Custom Limit & Payment Terms</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">Approved Credit Limit (₹)</label>
+                      <input
+                        type="number"
+                        value={overrideLimit}
+                        onChange={(e) => setOverrideLimit(e.target.value)}
+                        placeholder="Enter custom limit in ₹"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold text-sm focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">Payment Period</label>
+                      <select
+                        value={overrideDays}
+                        onChange={(e) => setOverrideDays(Number(e.target.value))}
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold text-sm focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value={15}>15 Days Credit</option>
+                        <option value={30}>30 Days Credit</option>
+                        <option value={0}>0 Days (Advance Payment Only)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Decision Action Buttons */}
-                <div className="flex items-center gap-3 pt-4 border-t border-slate-800">
+                <div className="flex items-center gap-3 pt-2 border-t border-slate-800">
                   <button
                     onClick={handleApprove}
                     disabled={actionLoading}
                     className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 transition-all"
                   >
-                    Approve & Issue Credit Offer
+                    Approve & Grant Credit (₹{overrideLimit ? Number(overrideLimit).toLocaleString('en-IN') : 0})
                   </button>
                   <button
                     onClick={handleHold}

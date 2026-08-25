@@ -8,9 +8,20 @@ export function setAuthToken(token: string) {
   localStorage.setItem('kresconet_admin_token', token);
 }
 
+export function getRefreshToken(): string | null {
+  return localStorage.getItem('kresconet_admin_refresh_token');
+}
+
+export function setRefreshToken(token: string) {
+  localStorage.setItem('kresconet_admin_refresh_token', token);
+}
+
 export function clearAuthToken() {
   localStorage.removeItem('kresconet_admin_token');
+  localStorage.removeItem('kresconet_admin_refresh_token');
 }
+
+let isRefreshing = false;
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
@@ -23,19 +34,54 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  let res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
   });
 
-  const body = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    if (res.status === 401 && !path.includes('/login')) {
+  if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh') && !isRefreshing) {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      isRefreshing = true;
+      try {
+        const refreshRes = await fetch(`${API_BASE}/auth/employee/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        const refreshData = await refreshRes.json();
+        isRefreshing = false;
+        if (refreshRes.ok && (refreshData.access_token || refreshData.token)) {
+          const newAccess = refreshData.access_token || refreshData.token;
+          setAuthToken(newAccess);
+          headers['Authorization'] = `Bearer ${newAccess}`;
+          res = await fetch(`${API_BASE}${path}`, {
+            ...options,
+            headers,
+          });
+        } else {
+          clearAuthToken();
+          localStorage.removeItem('kresconet_admin_user');
+          window.location.href = '/';
+          throw new Error('Session expired. Please log in again.');
+        }
+      } catch (err) {
+        isRefreshing = false;
+        clearAuthToken();
+        localStorage.removeItem('kresconet_admin_user');
+        window.location.href = '/';
+        throw err;
+      }
+    } else {
       clearAuthToken();
       localStorage.removeItem('kresconet_admin_user');
       window.location.href = '/';
     }
+  }
+
+  const body = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
     const errorMsg = body?.error?.message || body?.message || res.statusText || 'API Request Failed';
     throw new Error(errorMsg);
   }
@@ -80,10 +126,14 @@ export const api = {
   getApplication: (id: string) =>
     request<any>(`/admin/applications/${id}`),
 
-  approveApplication: (id: string, reason?: string) =>
+  approveApplication: (id: string, reason?: string, approvedLimitPaise?: number, approvedPeriodDays?: number) =>
     request<any>(`/admin/applications/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({
+        reason,
+        approved_limit_paise: approvedLimitPaise,
+        approved_period_days: approvedPeriodDays,
+      }),
     }),
 
   rejectApplication: (id: string, reason?: string) =>
