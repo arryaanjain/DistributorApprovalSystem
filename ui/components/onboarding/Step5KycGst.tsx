@@ -1,5 +1,5 @@
 import React from "react";
-import { FileCheck, ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck, UserCheck, Building2, Check } from "lucide-react";
+import { FileCheck, ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck, UserCheck, Building2, Check, Sparkles } from "lucide-react";
 import { Step5Data } from "@/types/onboarding";
 
 interface VerificationResults {
@@ -19,32 +19,60 @@ interface Step5KycGstProps {
   verificationResults?: VerificationResults;
   step1Name?: string;
   step1BusinessName?: string;
+  onGoToStep1?: () => void;
 }
 
-// Token-overlap name matching helper for frontend visualization
+function levenshtein(a: string, b: string): number {
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Case-insensitive & token/fuzzy edit distance matching helper
 function checkNamesMatch(a?: string, b?: string): boolean {
   if (!a || !b) return false;
-  const cleanA = a.toUpperCase().trim();
-  const cleanB = b.toUpperCase().trim();
+  const cleanA = a.toUpperCase().trim().replace(/[^A-Z0-9\s]/g, "");
+  const cleanB = b.toUpperCase().trim().replace(/[^A-Z0-9\s]/g, "");
   if (cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
 
   const wordsA = cleanA.split(/\s+/).filter(Boolean);
   const wordsB = cleanB.split(/\s+/).filter(Boolean);
   if (wordsA.length === 0 || wordsB.length === 0) return false;
 
-  const smaller = wordsA.length <= wordsB.length ? wordsA : wordsB;
-  const larger = wordsA.length > wordsB.length ? wordsA : wordsB;
+  const fullWordsA = wordsA.filter((w) => w.length > 1);
+  const fullWordsB = wordsB.filter((w) => w.length > 1);
 
-  let matches = 0;
-  for (const sw of smaller) {
-    for (const lw of larger) {
-      if (sw === lw || lw.startsWith(sw) || sw.startsWith(lw)) {
-        matches++;
-        break;
+  if (fullWordsA.length > 0 && fullWordsB.length > 0) {
+    const smaller = fullWordsA.length <= fullWordsB.length ? fullWordsA : fullWordsB;
+    const larger = fullWordsA.length > fullWordsB.length ? fullWordsA : fullWordsB;
+
+    let matches = 0;
+    for (const sw of smaller) {
+      for (const lw of larger) {
+        if (sw === lw || lw.startsWith(sw) || sw.startsWith(lw) || (sw.length >= 4 && lw.length >= 4 && levenshtein(sw, lw) <= 2)) {
+          matches++;
+          break;
+        }
       }
     }
+    const required = Math.min(2, smaller.length);
+    if (matches >= required) return true;
   }
-  return matches >= smaller.length;
+  return false;
 }
 
 export const Step5KycGst: React.FC<Step5KycGstProps> = ({
@@ -57,6 +85,7 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
   verificationResults,
   step1Name,
   step1BusinessName,
+  onGoToStep1,
 }) => {
   const isPanVerified = verificationResults?.panVerified;
   const isGstVerified = verificationResults?.gstVerified;
@@ -64,7 +93,7 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
   const gstLegalName = verificationResults?.gstLegalName;
 
   const isPanNameMatched = checkNamesMatch(step1Name, panHolderName);
-  const isGstNameMatched = checkNamesMatch(step1BusinessName, gstLegalName);
+  const isGstNameMatched = checkNamesMatch(step1BusinessName, gstLegalName) || checkNamesMatch(step1Name, gstLegalName);
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-xl max-w-3xl mx-auto space-y-6">
@@ -152,24 +181,44 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
                     <span className="font-semibold text-slate-300 font-mono">{step1BusinessName}</span>
                   </div>
                 )}
+                {step1Name && (
+                  <div className="flex justify-between items-center bg-slate-800/40 p-2 rounded-lg">
+                    <span className="text-slate-400">Step 1 Registered:</span>
+                    <span className="font-semibold text-slate-300 font-mono">{step1Name}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Mismatch Warning Alert Box */}
-      {verificationWarnings && verificationWarnings.length > 0 && (
-        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+      {/* Mismatch Warning Alert Box & Go To Step 1 Action */}
+      {((verificationWarnings && verificationWarnings.length > 0) || (onGoToStep1 && (!isPanNameMatched || !isGstNameMatched))) && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400" />
             <h4 className="text-xs font-bold uppercase text-amber-400 tracking-wider">Verification Mismatch Warnings</h4>
           </div>
-          <ul className="text-xs text-amber-200 space-y-1 list-disc pl-5">
-            {verificationWarnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
+          {verificationWarnings && verificationWarnings.length > 0 && (
+            <ul className="text-xs text-amber-200 space-y-1 list-disc pl-5">
+              {verificationWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          )}
+          {onGoToStep1 && (!isPanNameMatched || !isGstNameMatched) && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={onGoToStep1}
+                className="px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Go to Step 1 to Update Details / Fix Name Typos</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -247,31 +296,68 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-              FSSAI License Number (Optional)
-            </label>
-            <input
-              type="text"
-              value={step5.fssai_number}
-              onChange={(e) => setStep5({ ...step5, fssai_number: e.target.value })}
-              placeholder="10020021000123"
-              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
+        {/* Optional Compliance Credentials with Weightage Mechanics */}
+        <div className="p-5 bg-slate-800/40 border border-slate-700/80 rounded-2xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-xs font-bold uppercase text-slate-200 tracking-wider">
+                Optional Compliance & Regulatory Credentials
+              </h3>
+            </div>
+            <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1">
+              <Sparkles className="w-3 h-3" /> +5 Max Compliance Weightage Boost
+            </span>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-              Udyam / MSME Registration (Optional)
-            </label>
-            <input
-              type="text"
-              value={step5.udyam_number}
-              onChange={(e) => setStep5({ ...step5, udyam_number: e.target.value })}
-              placeholder="UDYAM-GJ-01-0001234"
-              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
+          <p className="text-xs text-slate-400">
+            Providing optional regulatory numbers (FSSAI / Udyam MSME) directly boosts your automated credit evaluation score and increases pre-approved credit limits.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase text-slate-300">
+                  FSSAI Food License (Optional)
+                </label>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition-all ${
+                  step5.fssai_number && step5.fssai_number.trim().length > 0
+                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                    : "bg-slate-800 text-slate-400 border-slate-700"
+                }`}>
+                  {step5.fssai_number && step5.fssai_number.trim().length > 0 ? "✓ +3 Pts Earned" : "+3 Pts Weightage"}
+                </span>
+              </div>
+              <input
+                type="text"
+                value={step5.fssai_number}
+                onChange={(e) => setStep5({ ...step5, fssai_number: e.target.value })}
+                placeholder="10020021000123"
+                className="w-full px-4 py-3 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 placeholder:text-slate-500"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase text-slate-300">
+                  Udyam / MSME Registration (Optional)
+                </label>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition-all ${
+                  step5.udyam_number && step5.udyam_number.trim().length > 0
+                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                    : "bg-slate-800 text-slate-400 border-slate-700"
+                }`}>
+                  {step5.udyam_number && step5.udyam_number.trim().length > 0 ? "✓ +3 Pts Earned" : "+3 Pts Weightage"}
+                </span>
+              </div>
+              <input
+                type="text"
+                value={step5.udyam_number}
+                onChange={(e) => setStep5({ ...step5, udyam_number: e.target.value })}
+                placeholder="UDYAM-GJ-01-0001234"
+                className="w-full px-4 py-3 bg-slate-900/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 placeholder:text-slate-500"
+              />
+            </div>
           </div>
         </div>
 

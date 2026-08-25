@@ -40,7 +40,7 @@ export interface Step2Data {
   interested_business_role: string;
   vintage_years: number;
   approx_monthly_business_inr: number;
-  existing_brands: string;
+  existing_brands: string[] | string;
 }
 
 export interface Step3Data {

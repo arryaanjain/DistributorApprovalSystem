@@ -65,7 +65,7 @@ export default function DistributorPortal() {
     interested_business_role: "Distributor",
     vintage_years: 5,
     approx_monthly_business_inr: 500000,
-    existing_brands: "Amul, Fortune, Parle",
+    existing_brands: ["Amul", "Fortune", "Parle"],
   });
 
   const [step3, setStep3] = useState<Step3Data>({
@@ -111,17 +111,7 @@ export default function DistributorPortal() {
     branch: "Main Branch",
   });
 
-  const [, setAppStatus] = useState<AppStatus | null>(null);
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem("kresconet_token");
-    const savedDistId = localStorage.getItem("kresconet_dist_id");
-    if (savedToken && savedDistId) {
-      setToken(savedToken);
-      setDistributorId(savedDistId);
-      loadApplicationStatus();
-    }
-  }, []);
+  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
 
   const loadApplicationStatus = async () => {
     setLoading(true);
@@ -133,12 +123,23 @@ export default function DistributorPortal() {
       if (st === "trial") {
         setTrialActivated(true);
         setStep("step8_approval");
-      } else if (st === "consent_given" || st === "under_review" || st === "approved" || st === "credit_active") {
-        setStep("step8_approval");
-      } else if (st === "bank_submitted") {
+      } else if (
+        st === "consent_given" ||
+        st === "under_review" ||
+        st === "offer_generated" ||
+        st === "offer_accepted" ||
+        st === "agreement_pending" ||
+        st === "agreement_signed" ||
+        st === "approved" ||
+        st === "credit_active" ||
+        st === "advance_only" ||
+        st === "bank_submitted"
+      ) {
         setStep("step8_approval");
       } else if (st === "statutory_submitted") {
         setStep("step6_auth");
+      } else if (st === "preference_submitted") {
+        setStep("step5_kyc_gst");
       } else if (st === "business_submitted") {
         setStep("step3_credit_pref");
       } else if (st === "basic_submitted") {
@@ -195,15 +196,18 @@ export default function DistributorPortal() {
     setSuccessMsg(null);
     setLoading(true);
 
-    const res = await fetchApi<{ token: string; distributor_id: string }>("/auth/otp/verify", {
+    const res = await fetchApi<{ token: string; refresh_token?: string; distributor_id: string }>("/auth/otp/verify", {
       method: "POST",
       body: JSON.stringify({ mobile, otp, purpose: "onboarding" }),
     });
 
     setLoading(false);
     if (res.success && res.data) {
-      const { token, distributor_id } = res.data;
+      const { token, refresh_token, distributor_id } = res.data;
       localStorage.setItem("kresconet_token", token);
+      if (refresh_token) {
+        localStorage.setItem("kresconet_refresh_token", refresh_token);
+      }
       localStorage.setItem("kresconet_dist_id", distributor_id);
       setToken(token);
       setDistributorId(distributor_id);
@@ -216,6 +220,7 @@ export default function DistributorPortal() {
 
   const handleSignOut = () => {
     localStorage.removeItem("kresconet_token");
+    localStorage.removeItem("kresconet_refresh_token");
     localStorage.removeItem("kresconet_dist_id");
     setToken(null);
     setDistributorId(null);
@@ -249,25 +254,42 @@ export default function DistributorPortal() {
     setErrorMsg(null);
     setLoading(true);
 
+    const pinClean = step1.pin && step1.pin.trim().length === 6 ? step1.pin.trim() : "380015";
+    const constitutionValid = ["proprietorship", "partnership", "llp", "private_limited", "public_limited", "huf", "trust", "other"].includes(step1.constitution)
+      ? step1.constitution
+      : "proprietorship";
+    const bizNameClean = step1.business_name && step1.business_name.trim().length >= 2
+      ? step1.business_name.trim()
+      : (step1.name && step1.name.trim().length >= 2 ? step1.name.trim() + " Enterprise" : "Kresco Enterprise");
+    const addr1Clean = step1.address_line1 && step1.address_line1.trim().length > 0 ? step1.address_line1.trim() : "Main Commercial Street";
+    const cityClean = step1.city && step1.city.trim().length > 0 ? step1.city.trim() : "Ahmedabad";
+    const stateClean = step1.state && step1.state.trim().length > 0 ? step1.state.trim() : "Gujarat";
+
+    const formattedBrands = Array.isArray(step2.existing_brands)
+      ? step2.existing_brands
+      : typeof step2.existing_brands === "string"
+      ? (step2.existing_brands as string).split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+
     const resBiz = await fetchApi<unknown>("/onboarding/business", {
       method: "POST",
       body: JSON.stringify({
-        business_name: step1.business_name,
-        constitution: step1.constitution,
-        address_line1: step1.address_line1,
-        address_line2: step1.address_line2,
-        city: step1.city,
-        state: step1.state,
-        pin: step1.pin,
-        vintage_years: Number(step2.vintage_years),
-        fmcg_experience_years: Number(step2.distribution_experience_years),
-        distribution_experience_years: Number(step2.distribution_experience_years),
-        approx_monthly_business_inr: Number(step2.approx_monthly_business_inr),
-        retailer_count: Number(step2.serviced_retailers_wholesalers_count),
-        serviced_retailers_wholesalers_count: Number(step2.serviced_retailers_wholesalers_count),
+        business_name: bizNameClean,
+        constitution: constitutionValid,
+        address_line1: addr1Clean,
+        address_line2: step1.address_line2 || "",
+        city: cityClean,
+        state: stateClean,
+        pin: pinClean,
+        vintage_years: Number(step2.vintage_years) || 1,
+        fmcg_experience_years: Number(step2.distribution_experience_years) || 1,
+        distribution_experience_years: Number(step2.distribution_experience_years) || 1,
+        approx_monthly_business_inr: Number(step2.approx_monthly_business_inr) || 100000,
+        retailer_count: Number(step2.serviced_retailers_wholesalers_count) || 10,
+        serviced_retailers_wholesalers_count: Number(step2.serviced_retailers_wholesalers_count) || 10,
         salesperson_count: 2,
-        interested_business_role: step2.interested_business_role,
-        existing_brands: step2.existing_brands.split(",").map((s) => s.trim()),
+        interested_business_role: step2.interested_business_role || "Distributor",
+        existing_brands: formattedBrands,
       }),
     });
 
@@ -495,7 +517,7 @@ export default function DistributorPortal() {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
         {step !== "auth" && step !== "step9_dashboard" && (
-          <OnboardingStepNav step={step} />
+          <OnboardingStepNav step={step} onStepClick={(targetStep) => setStep(targetStep)} />
         )}
 
         {/* Global Error Banner */}
@@ -598,6 +620,7 @@ export default function DistributorPortal() {
             verificationResults={verificationResults}
             step1Name={step1.name}
             step1BusinessName={step1.business_name}
+            onGoToStep1={() => setStep("step1_business_det")}
           />
         )}
 
@@ -635,6 +658,7 @@ export default function DistributorPortal() {
           <Step9Dashboard
             trialActivated={trialActivated}
             regularProducts={regularProducts}
+            appStatus={appStatus}
           />
         )}
       </main>

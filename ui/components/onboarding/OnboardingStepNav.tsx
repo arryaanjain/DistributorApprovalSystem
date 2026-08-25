@@ -4,25 +4,33 @@ import { OnboardingStep, STEP_LABELS } from "@/types/onboarding";
 
 interface OnboardingStepNavProps {
   step: OnboardingStep;
+  onStepClick?: (step: OnboardingStep) => void;
 }
 
-export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step }) => {
+export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onStepClick }) => {
+  const stepKeys: OnboardingStep[] = [
+    "step1_business_det",
+    "step2_business_exp",
+    "step3_credit_pref",
+    "step4_order_req",
+    "step5_kyc_gst",
+    "step6_auth",
+    "step7_bank",
+    "step8_approval",
+    "step9_dashboard",
+  ];
+
   const getStepProgressIndex = () => {
-    const stepKeys = [
-      "step1_business_det",
-      "step2_business_exp",
-      "step3_credit_pref",
-      "step4_order_req",
-      "step5_kyc_gst",
-      "step6_auth",
-      "step7_bank",
-      "step8_approval",
-      "step9_dashboard",
-    ];
     return stepKeys.indexOf(step);
   };
 
   const currentProgressIdx = getStepProgressIndex() + 1;
+
+  const handleStepClick = (num: number) => {
+    if (onStepClick && num <= stepKeys.length) {
+      onStepClick(stepKeys[num - 1]);
+    }
+  };
 
   return (
     <div className="mb-8">
@@ -31,27 +39,35 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step }) =>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
           const isDone = num < currentProgressIdx;
           const isCurrent = num === currentProgressIdx;
+          const isClickable = Boolean(onStepClick);
 
           return (
-            <div key={num} className="flex items-center gap-2 min-w-max">
+            <div
+              key={num}
+              onClick={() => handleStepClick(num)}
+              title={isClickable ? `Jump to ${Object.values(STEP_LABELS).find((s) => s.num === num)?.title}` : undefined}
+              className={`flex items-center gap-2 min-w-max ${
+                isClickable ? "cursor-pointer group select-none" : ""
+              }`}
+            >
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                   isDone
-                    ? "bg-emerald-500 text-slate-950 font-extrabold"
+                    ? "bg-emerald-500 text-slate-950 font-extrabold group-hover:bg-emerald-400 group-hover:scale-105"
                     : isCurrent
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/40 ring-4 ring-indigo-500/20"
-                    : "bg-slate-800 text-slate-500"
+                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/40 ring-4 ring-indigo-500/20 group-hover:bg-indigo-500"
+                    : "bg-slate-800 text-slate-500 group-hover:bg-slate-700 group-hover:text-slate-300"
                 }`}
               >
                 {isDone ? <Check className="w-4 h-4" /> : num}
               </div>
               <span
-                className={`text-xs font-medium ${
+                className={`text-xs font-medium transition-colors ${
                   isCurrent
                     ? "text-indigo-400 font-semibold"
                     : isDone
-                    ? "text-slate-300"
-                    : "text-slate-600"
+                    ? "text-slate-300 group-hover:text-white font-medium"
+                    : "text-slate-600 group-hover:text-slate-400"
                 }`}
               >
                 {Object.values(STEP_LABELS).find((s) => s.num === num)?.title}

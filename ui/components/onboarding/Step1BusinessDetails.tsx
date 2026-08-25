@@ -31,7 +31,7 @@ export const Step1BusinessDetails: React.FC<Step1BusinessDetailsProps> = ({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-              Contact Person Name *
+              Business Owner Name *
             </label>
             <input
               type="text"

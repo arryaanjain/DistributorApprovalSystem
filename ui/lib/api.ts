@@ -16,11 +16,13 @@ export interface ApiResponse<T> {
   };
 }
 
+let isRefreshing = false;
+
 export async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("kresconet_token") : null;
+  let token = typeof window !== "undefined" ? localStorage.getItem("kresconet_token") : null;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -32,10 +34,53 @@ export async function fetchApi<T>(
   }
 
   try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
+    let res = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers,
     });
+
+    if (
+      res.status === 401 &&
+      !endpoint.includes("/auth/otp") &&
+      !endpoint.includes("/auth/refresh") &&
+      !isRefreshing &&
+      typeof window !== "undefined"
+    ) {
+      const refreshToken = localStorage.getItem("kresconet_refresh_token");
+      if (refreshToken) {
+        isRefreshing = true;
+        try {
+          const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          const refreshData = await refreshRes.json();
+          isRefreshing = false;
+
+          const newToken =
+            refreshData.access_token ||
+            refreshData.token ||
+            (refreshData.data && (refreshData.data.access_token || refreshData.data.token));
+
+          if (refreshRes.ok && newToken) {
+            localStorage.setItem("kresconet_token", newToken);
+            headers["Authorization"] = `Bearer ${newToken}`;
+            res = await fetch(`${API_BASE}${endpoint}`, {
+              ...options,
+              headers,
+            });
+          } else {
+            localStorage.removeItem("kresconet_token");
+            localStorage.removeItem("kresconet_refresh_token");
+          }
+        } catch {
+          isRefreshing = false;
+          localStorage.removeItem("kresconet_token");
+          localStorage.removeItem("kresconet_refresh_token");
+        }
+      }
+    }
 
     const data = await res.json();
     return data as ApiResponse<T>;
