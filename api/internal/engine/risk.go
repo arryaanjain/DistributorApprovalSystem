@@ -25,17 +25,29 @@ func EvaluateHardRisk(
 	}
 
 	// 2. Bank account mismatch / verification failed
-	if vers != nil && vers.Bank != nil && string(vers.Bank.Status) == "failed" {
+	if vers != nil && vers.Bank != nil && string(vers.Bank.Status) == "failed" && vers.Bank.AccountNumber != "" {
 		flags = append(flags, "BANK_VERIFICATION_FAILED")
 	}
 
 	// 3. Active defaults / write-offs on CIBIL credit report
 	if vers != nil && vers.CreditReport != nil {
 		if vers.CreditReport.HasDefaults != nil && *vers.CreditReport.HasDefaults {
-			flags = append(flags, "CREDIT_BUREAU_DEFAULT")
+			bureauScore := 0
+			if vers.CreditReport.BureauScore != nil {
+				bureauScore = *vers.CreditReport.BureauScore
+			}
+			if bureauScore < 660 {
+				flags = append(flags, "CREDIT_BUREAU_DEFAULT")
+			}
 		}
 		if vers.CreditReport.HasWriteoffs != nil && *vers.CreditReport.HasWriteoffs {
-			flags = append(flags, "CREDIT_BUREAU_WRITEOFF")
+			bureauScore := 0
+			if vers.CreditReport.BureauScore != nil {
+				bureauScore = *vers.CreditReport.BureauScore
+			}
+			if bureauScore < 660 {
+				flags = append(flags, "CREDIT_BUREAU_WRITEOFF")
+			}
 		}
 		if vers.CreditReport.FraudFlag {
 			flags = append(flags, "BUREAU_FRAUD_FLAG")
