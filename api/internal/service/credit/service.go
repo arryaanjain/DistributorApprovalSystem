@@ -68,11 +68,9 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 		slog.Error("saving score failed", "error", err, "distributor_id", distID)
 	}
 
-	// Save risk flags
-	if len(riskEval.RiskFlags) > 0 {
-		if err := s.creditRepo.SaveRiskFlags(ctx, distID, appID, riskEval.RiskFlags); err != nil {
-			slog.Error("saving risk flags failed", "error", err, "distributor_id", distID)
-		}
+	// Save risk flags (deactivates old flags and saves new ones)
+	if err := s.creditRepo.SaveRiskFlags(ctx, distID, appID, riskEval.RiskFlags); err != nil {
+		slog.Error("saving risk flags failed", "error", err, "distributor_id", distID)
 	}
 
 	// 3. Compute Decision
@@ -80,7 +78,18 @@ func (s *Service) EvaluateApplication(ctx context.Context, appID string) (*repos
 	if app.PaymentPreference != nil {
 		pref = *app.PaymentPreference
 	}
-	decOutput := engine.ComputeDecision(scoreResult, riskEval, docs, pref)
+	decOutput := engine.ComputeDecision(scoreResult, riskEval, docs, bp, pref)
+
+	slog.Info("credit evaluation result",
+		"distributor_id", distID,
+		"application_id", appID,
+		"total_score", scoreResult.TotalScore,
+		"risk_grade", scoreResult.RiskGrade,
+		"hard_risk_triggered", riskEval.HardRiskTriggered,
+		"risk_flags", riskEval.RiskFlags,
+		"decision", decOutput.Decision,
+		"approved_limit_inr", decOutput.ApprovedLimitPaise/100,
+	)
 
 	var scoreIDPtr *string
 	if scoreID != "" {

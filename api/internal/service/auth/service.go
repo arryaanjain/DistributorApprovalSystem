@@ -4,7 +4,6 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -22,17 +21,26 @@ const (
 
 // Service handles all authentication logic.
 type Service struct {
-	cfg      *config.Config
-	otpRepo  *repository.OTPRepository
-	userRepo *repository.UserRepository
-	distRepo *repository.DistributorRepository
-	msg91    MSG91Client
+	cfg              *config.Config
+	otpRepo          *repository.OTPRepository
+	userRepo         *repository.UserRepository
+	distRepo         *repository.DistributorRepository
+	refreshTokenRepo *repository.RefreshTokenRepository
+	msg91            MSG91Client
 }
 
 // New creates an Auth service.
 func New(cfg *config.Config, otpRepo *repository.OTPRepository,
-	userRepo *repository.UserRepository, distRepo *repository.DistributorRepository, msg91 MSG91Client) *Service {
-	return &Service{cfg: cfg, otpRepo: otpRepo, userRepo: userRepo, distRepo: distRepo, msg91: msg91}
+	userRepo *repository.UserRepository, distRepo *repository.DistributorRepository,
+	refreshTokenRepo *repository.RefreshTokenRepository, msg91 MSG91Client) *Service {
+	return &Service{
+		cfg:              cfg,
+		otpRepo:          otpRepo,
+		userRepo:         userRepo,
+		distRepo:         distRepo,
+		refreshTokenRepo: refreshTokenRepo,
+		msg91:            msg91,
+	}
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -46,8 +54,6 @@ type SendOTPResult struct {
 }
 
 // SendOTP generates an OTP for the given mobile number.
-// In dev mode, the OTP is returned in the result for testing.
-// In production, it should be dispatched via SMS/WhatsApp through a queue job.
 func (s *Service) SendOTP(ctx context.Context, mobile, purpose string) (*SendOTPResult, error) {
 	// Validate purpose
 	if purpose != PurposeOnboarding && purpose != PurposeLogin {
@@ -92,12 +98,12 @@ func (s *Service) SendOTP(ctx context.Context, mobile, purpose string) (*SendOTP
 // VerifyOTPResult is returned after a successful OTP verification.
 type VerifyOTPResult struct {
 	DistributorID string
-	Token         string // short-lived JWT for onboarding steps
+	Token         string // short-lived access token
+	RefreshToken  string // 1-month long-lived refresh token stored in Postgres DB
 	IsNewUser     bool
 }
 
-// VerifyOTP validates the OTP and issues a distributor JWT.
-// If no distributor record exists for the mobile, one is created.
+// VerifyOTP validates the OTP and issues a distributor JWT and long-lived Postgres DB refresh token.
 func (s *Service) VerifyOTP(ctx context.Context, mobile, otp, purpose string) (*VerifyOTPResult, error) {
 	record, err := s.otpRepo.GetLatestPending(ctx, mobile, purpose)
 	if err != nil {
@@ -152,12 +158,25 @@ func (s *Service) VerifyOTP(ctx context.Context, mobile, otp, purpose string) (*
 
 	token, err := s.issueDistributorToken(dist.ID, mobile)
 	if err != nil {
-		return nil, apperrors.Internal("issuing token", err)
+		return nil, apperrors.Internal("issuing access token", err)
+	}
+
+	// Issue long-lived 1-month refresh token in Postgres DB
+	refreshTokenStr, err := crypto.GenerateToken(32)
+	if err != nil {
+		return nil, apperrors.Internal("generating refresh token", err)
+	}
+	refreshExpiry := time.Now().Add(30 * 24 * time.Hour) // 1 month
+	if s.refreshTokenRepo != nil {
+		if err := s.refreshTokenRepo.Create(ctx, refreshTokenStr, dist.ID, "distributor", mobile, "", refreshExpiry); err != nil {
+			slog.Error("failed to store distributor refresh token in DB", "error", err, "distributor_id", dist.ID)
+		}
 	}
 
 	return &VerifyOTPResult{
 		DistributorID: dist.ID,
 		Token:         token,
+		RefreshToken:  refreshTokenStr,
 		IsNewUser:     isNew,
 	}, nil
 }
@@ -180,9 +199,9 @@ func (s *Service) issueDistributorToken(distributorID, mobile string) (string, e
 
 // EmployeeLoginResult holds tokens for an authenticated employee.
 type EmployeeLoginResult struct {
-	AccessToken  string
-	RefreshToken string
-	User         EmployeeProfile
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	User         EmployeeProfile `json:"user"`
 }
 
 // EmployeeProfile is safe to return to the frontend (no password hash).
@@ -193,7 +212,7 @@ type EmployeeProfile struct {
 	Role  string `json:"role"`
 }
 
-// EmployeeLogin validates email + password and issues access + refresh tokens.
+// EmployeeLogin validates email + password and issues access + 1-month refresh tokens in Postgres DB.
 func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*EmployeeLoginResult, error) {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
@@ -211,43 +230,67 @@ func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*E
 	if err != nil {
 		return nil, apperrors.Internal("issuing access token", err)
 	}
-	refreshToken, err := s.issueEmployeeRefreshToken(user.ID, user.Email, user.Role)
+
+	// Generate 1-month long-lived refresh token in Postgres DB
+	refreshTokenStr, err := crypto.GenerateToken(32)
 	if err != nil {
-		return nil, apperrors.Internal("issuing refresh token", err)
+		return nil, apperrors.Internal("generating refresh token", err)
+	}
+	refreshExpiry := time.Now().Add(30 * 24 * time.Hour) // 1 month
+	if s.refreshTokenRepo != nil {
+		if err := s.refreshTokenRepo.Create(ctx, refreshTokenStr, user.ID, "employee", user.Email, user.Role, refreshExpiry); err != nil {
+			slog.Error("failed to store employee refresh token in DB", "error", err, "user_id", user.ID)
+		}
 	}
 
 	_ = s.userRepo.UpdateLastLogin(ctx, user.ID)
 
 	return &EmployeeLoginResult{
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: refreshTokenStr,
 		User:         EmployeeProfile{ID: user.ID, Name: user.Name, Email: user.Email, Role: user.Role},
 	}, nil
 }
 
-// RefreshEmployeeToken validates a refresh token and issues a new access token.
-func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (string, error) {
-	claims := jwt.MapClaims{}
-	token, err := jwt.ParseWithClaims(refreshToken, claims, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
+// RefreshToken validates a long-lived Postgres DB refresh token and issues a new access token.
+// The refresh token itself is NOT rotated — it gracefully expires after 1 month.
+func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (string, error) {
+	if refreshTokenStr == "" {
+		return "", apperrors.Unauthorized("missing refresh token")
+	}
+
+	if s.refreshTokenRepo == nil {
+		return "", apperrors.Unauthorized("refresh token repo unavailable")
+	}
+
+	rec, err := s.refreshTokenRepo.GetValid(ctx, refreshTokenStr)
+	if err != nil {
+		return "", apperrors.Internal("verifying refresh token from DB", err)
+	}
+	if rec == nil {
+		return "", apperrors.Unauthorized("refresh token expired or invalid, please login again")
+	}
+
+	if rec.SubjectType == "employee" {
+		user, err := s.userRepo.GetByID(ctx, rec.SubjectID)
+		if err != nil || user == nil || !user.IsActive {
+			return "", apperrors.Unauthorized("employee account is inactive or not found")
 		}
-		return []byte(s.cfg.JWT.RefreshSecret), nil
-	})
-	if err != nil || !token.Valid {
-		return "", apperrors.Unauthorized("invalid or expired refresh token")
+		return s.issueEmployeeToken(user.ID, user.Email, user.Role, s.cfg.JWT.AccessExpiry)
+	} else if rec.SubjectType == "distributor" {
+		dist, err := s.distRepo.GetByID(ctx, rec.SubjectID)
+		if err != nil || dist == nil {
+			return "", apperrors.Unauthorized("distributor account not found")
+		}
+		return s.issueDistributorToken(dist.ID, dist.Mobile)
 	}
 
-	userID, _ := claims["user_id"].(string)
-	email, _ := claims["email"].(string)
-	role, _ := claims["role"].(string)
+	return "", apperrors.Unauthorized("invalid subject type for refresh token")
+}
 
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil || user == nil || !user.IsActive {
-		return "", apperrors.Unauthorized("user account is inactive or not found")
-	}
-
-	return s.issueEmployeeToken(userID, email, role, s.cfg.JWT.AccessExpiry)
+// RefreshEmployeeToken is a wrapper for employee refresh calls.
+func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (string, error) {
+	return s.RefreshToken(ctx, refreshToken)
 }
 
 func (s *Service) issueEmployeeToken(userID, email, role string, expiry time.Duration) (string, error) {

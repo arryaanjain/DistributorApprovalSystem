@@ -235,7 +235,7 @@ func (s *Service) SubmitStatutory(ctx context.Context, distributorID string, in 
 		} else if panRes != nil {
 			slog.Info("real-time PAN verification result", "status", panRes.Status, "name", panRes.NameOnPAN, "distributor_id", distributorID)
 			panHolderName = panRes.NameOnPAN
-			if panRes.Status == "verified" {
+			if panRes.Status == "verified" || (step1Name != "" && svcver.NamesMatch(panRes.NameOnPAN, step1Name)) {
 				panVerified = true
 			} else if panRes.Status == "mismatch" {
 				warnings = append(warnings, fmt.Sprintf("PAN holder name '%s' does not match registered name '%s'", panRes.NameOnPAN, step1Name))
@@ -247,17 +247,21 @@ func (s *Service) SubmitStatutory(ctx context.Context, distributorID string, in 
 
 	// ── Real-time GST Verification ─────────────────────────────────────────
 	if s.verSvc != nil && in.GSTNumber != "" {
-		gstRes, err := s.verSvc.VerifyGSTOnly(ctx, distributorID, app.ID, in.GSTNumber, step1BusinessName)
+		gstRes, err := s.verSvc.VerifyGSTOnly(ctx, distributorID, app.ID, in.GSTNumber, step1Name, step1BusinessName)
 		if err != nil {
 			slog.Error("real-time GST verification error", "error", err, "distributor_id", distributorID)
 			warnings = append(warnings, "GST verification service unavailable; flagged for manual review")
 		} else if gstRes != nil {
 			slog.Info("real-time GST verification result", "status", gstRes.Status, "legal_name", gstRes.LegalName, "distributor_id", distributorID)
 			gstLegalName = gstRes.LegalName
-			if gstRes.Status == "verified" || gstRes.Status == "partially_verified" {
+
+			matched := (step1Name != "" && (svcver.NamesMatch(gstRes.LegalName, step1Name) || svcver.NamesMatch(gstRes.TradeName, step1Name))) ||
+				(step1BusinessName != "" && (svcver.NamesMatch(gstRes.LegalName, step1BusinessName) || svcver.NamesMatch(gstRes.TradeName, step1BusinessName)))
+
+			if matched || gstRes.Status == "verified" || gstRes.Status == "partially_verified" {
 				gstVerified = true
 			} else if gstRes.Status == "mismatch" {
-				warnings = append(warnings, fmt.Sprintf("GST legal name '%s' / trade name '%s' does not match business name '%s'", gstRes.LegalName, gstRes.TradeName, step1BusinessName))
+				warnings = append(warnings, fmt.Sprintf("GST legal name '%s' / trade name '%s' does not match registered name '%s' or business name '%s'", gstRes.LegalName, gstRes.TradeName, step1Name, step1BusinessName))
 			} else if gstRes.Status == "failed" || gstRes.Status == "unavailable" {
 				warnings = append(warnings, "GST verification failed with GSTIN portal records")
 			}
@@ -457,27 +461,37 @@ func (s *Service) SubmitConsent(ctx context.Context, distributorID, mobile strin
 
 // ApplicationStatus is returned by GetStatus.
 type ApplicationStatus struct {
-	ApplicationID      string  `json:"application_id"`
-	Status             string  `json:"status"`
-	PaymentPreference  *string `json:"payment_preference,omitempty"`
-	ExposureClass      *string `json:"exposure_class,omitempty"`
-	IsDuplicateSuspect bool    `json:"is_duplicate_suspect"`
+	ApplicationID       string  `json:"application_id"`
+	Status              string  `json:"status"`
+	PaymentPreference   *string `json:"payment_preference,omitempty"`
+	ExposureClass       *string `json:"exposure_class,omitempty"`
+	IsDuplicateSuspect  bool    `json:"is_duplicate_suspect"`
+	AssignedCreditLimit int64   `json:"assigned_credit_limit,omitempty"`
 }
 
 func (s *Service) GetStatus(ctx context.Context, distributorID string) (*ApplicationStatus, error) {
-	app, err := s.distRepo.GetActiveApplication(ctx, distributorID)
+	app, err := s.distRepo.GetLatestApplication(ctx, distributorID)
 	if err != nil {
 		return nil, apperrors.Internal("fetching application", err)
 	}
 	if app == nil {
-		return nil, apperrors.NotFound("no active application found")
+		return nil, apperrors.NotFound("no application found")
 	}
+
+	var assignedLimit int64
+	if s.creditSvc != nil {
+		if dec, err := s.creditSvc.GetDecision(ctx, app.ID); err == nil && dec != nil {
+			assignedLimit = dec.ApprovedLimitPaise
+		}
+	}
+
 	return &ApplicationStatus{
-		ApplicationID:      app.ID,
-		Status:             app.Status,
-		PaymentPreference:  app.PaymentPreference,
-		ExposureClass:      app.ExposureClass,
-		IsDuplicateSuspect: app.IsDuplicateSuspect,
+		ApplicationID:       app.ID,
+		Status:              app.Status,
+		PaymentPreference:   app.PaymentPreference,
+		ExposureClass:       app.ExposureClass,
+		IsDuplicateSuspect:  app.IsDuplicateSuspect,
+		AssignedCreditLimit: assignedLimit,
 	}, nil
 }
 
