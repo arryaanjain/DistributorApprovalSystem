@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/middleware"
@@ -87,20 +88,26 @@ func (h *AdminHandler) GetApplication(w http.ResponseWriter, r *http.Request) {
 
 	verifications, _ := h.verRepo.GetAllForApplication(r.Context(), app.DistributorID)
 	decision, _ := h.creditRepo.GetDecisionByAppID(r.Context(), appID)
+	riskFlags, _ := h.creditRepo.GetActiveRiskFlags(r.Context(), app.DistributorID)
+	scoreComponents, _ := h.creditRepo.GetScoreComponents(r.Context(), appID)
 
 	response.JSON(w, map[string]interface{}{
-		"application":   app,
-		"distributor":   dist,
-		"profile":       profile,
-		"documents":     docs,
-		"bank_details":  bank,
-		"verifications": verifications,
-		"decision":      decision,
+		"application":      app,
+		"distributor":      dist,
+		"profile":          profile,
+		"documents":        docs,
+		"bank_details":     bank,
+		"verifications":    verifications,
+		"decision":         decision,
+		"risk_flags":       riskFlags,
+		"score_components": scoreComponents,
 	})
 }
 
 type ActionReasonInput struct {
-	Reason string `json:"reason"`
+	Reason             string `json:"reason"`
+	ApprovedLimitPaise *int64 `json:"approved_limit_paise"`
+	ApprovedPeriodDays *int   `json:"approved_period_days"`
 }
 
 func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request) {
@@ -127,14 +134,40 @@ func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request
 		decRecord, _ = h.creditSvc.EvaluateApplication(r.Context(), app.ID)
 	}
 
-	// 3. Mark application status based on credit decision
-	targetStatus := "offer_generated"
-	if decRecord != nil {
-		if decRecord.Decision == "ADVANCE_ONLY" {
-			targetStatus = "advance_only"
-		} else if decRecord.Decision == "REJECT" {
-			targetStatus = "rejected"
+	// Manual Admin Override if limit specified
+	if input.ApprovedLimitPaise != nil && h.creditRepo != nil {
+		limit := *input.ApprovedLimitPaise
+		period := 15
+		if input.ApprovedPeriodDays != nil && *input.ApprovedPeriodDays > 0 {
+			period = *input.ApprovedPeriodDays
 		}
+		eligibility := "APPROVED"
+		if limit == 0 {
+			eligibility = "ADVANCE_ONLY"
+		}
+		overrideRec := &repository.CreditDecisionRecord{
+			ApplicationID:      app.ID,
+			DistributorID:      app.DistributorID,
+			PolicyVersion:      "v1.0-override",
+			ApprovedLimitPaise: limit,
+			ApprovedPeriodDays: period,
+			Decision:           eligibility,
+			DecidedBy:          userID,
+			DecidedAt:          time.Now(),
+		}
+		if decRecord != nil && decRecord.CreditScoreID != nil {
+			overrideRec.CreditScoreID = decRecord.CreditScoreID
+		}
+		_, _ = h.creditRepo.SaveDecision(r.Context(), overrideRec)
+		decRecord = overrideRec
+	}
+
+	// 3. Mark application status as 'credit_active' once credit is calculated & approved
+	targetStatus := "credit_active"
+	if decRecord != nil && decRecord.Decision == "ADVANCE_ONLY" && (input.ApprovedLimitPaise == nil || *input.ApprovedLimitPaise == 0) {
+		targetStatus = "advance_only"
+	} else if decRecord != nil && decRecord.Decision == "REJECT" {
+		targetStatus = "rejected"
 	}
 
 	reason := "Approved by employee"
@@ -155,7 +188,7 @@ func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request
 	response.JSON(w, map[string]interface{}{
 		"status":         targetStatus,
 		"application_id": app.ID,
-		"message":        "Application approved and credit offer generated successfully",
+		"message":        "Application approved and completed successfully",
 	})
 }
 

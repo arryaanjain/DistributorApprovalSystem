@@ -58,6 +58,7 @@ func New(deps *Dependencies) http.Handler {
 			})
 			r.Post("/employee/login", h.Auth.EmployeeLogin)
 			r.Post("/employee/refresh", h.Auth.EmployeeRefresh)
+			r.Post("/refresh", h.Auth.RefreshToken)
 		})
 
 		// ── Onboarding (distributor-facing, requires distributor JWT) ─────────

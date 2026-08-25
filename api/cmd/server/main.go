@@ -70,17 +70,18 @@ func main() {
 	slog.Info("credit policy loaded", "version", activePolicy.Version)
 
 	// ── Repositories ───────────────────────────────────────────────────────
-	otpRepo    := repository.NewOTPRepository(pool)
-	userRepo   := repository.NewUserRepository(pool)
-	distRepo   := repository.NewDistributorRepository(pool)
-	verRepo    := repository.NewVerificationRepository(pool)
-	creditRepo := repository.NewCreditRepository(pool)
-	orderRepo  := repository.NewOrderRepository(pool)
-	finRepo    := repository.NewFinancialRepository(pool)
+	otpRepo          := repository.NewOTPRepository(pool)
+	userRepo         := repository.NewUserRepository(pool)
+	distRepo         := repository.NewDistributorRepository(pool)
+	refreshTokenRepo := repository.NewRefreshTokenRepository(pool)
+	verRepo          := repository.NewVerificationRepository(pool)
+	creditRepo       := repository.NewCreditRepository(pool)
+	orderRepo        := repository.NewOrderRepository(pool)
+	finRepo          := repository.NewFinancialRepository(pool)
 
 	// ── Services ───────────────────────────────────────────────────────────
 	msg91     := svcauth.NewMSG91Client(&cfg.MSG91)
-	authSvc   := svcauth.New(cfg, otpRepo, userRepo, distRepo, msg91)
+	authSvc   := svcauth.New(cfg, otpRepo, userRepo, distRepo, refreshTokenRepo, msg91)
 	surepass  := svcver.NewSurepassClient(cfg.Surepass.BaseURL, cfg.Surepass.CIBILBaseURL, cfg.Surepass.Token, cfg.Surepass.CIBILToken)
 	verSvc    := svcver.New(verRepo, distRepo, surepass)
 	creditSvc := svccredit.New(creditRepo, distRepo, verRepo)

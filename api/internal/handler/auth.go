@@ -84,6 +84,7 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, map[string]interface{}{
 		"token":          result.Token,
+		"refresh_token": result.RefreshToken,
 		"distributor_id": result.DistributorID,
 		"is_new_user":    result.IsNewUser,
 	})
@@ -120,26 +121,33 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ─── POST /api/v1/auth/employee/refresh ──────────────────────────────────────
+// ─── POST /api/v1/auth/refresh & /api/v1/auth/employee/refresh ────────────────
 
-type employeeRefreshRequest struct {
+type refreshRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }
 
-func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
-	var req employeeRefreshRequest
+func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.BadRequest(w, "invalid request body")
 		return
 	}
 
-	accessToken, err := h.svc.RefreshEmployeeToken(r.Context(), req.RefreshToken)
+	accessToken, err := h.svc.RefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
-	response.JSON(w, map[string]string{"access_token": accessToken})
+	response.JSON(w, map[string]string{
+		"access_token": accessToken,
+		"token":        accessToken,
+	})
+}
+
+func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
+	h.RefreshToken(w, r)
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
