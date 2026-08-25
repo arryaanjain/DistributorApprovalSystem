@@ -79,8 +79,17 @@ func (r *CreditRepository) SaveScore(ctx context.Context, distributorID, appID s
 	}
 	defer tx.Rollback(ctx)
 
-	rg := riskGrade
-	if rg != "A" && rg != "B" && rg != "C" && rg != "D" && rg != "E" {
+	rg := "A"
+	switch riskGrade {
+	case "GRADE_A_PLUS", "GRADE_A":
+		rg = "A"
+	case "GRADE_B":
+		rg = "B"
+	case "GRADE_C":
+		rg = "C"
+	case "GRADE_HIGH_RISK":
+		rg = "D"
+	default:
 		rg = "A"
 	}
 
@@ -110,6 +119,9 @@ func (r *CreditRepository) SaveScore(ctx context.Context, distributorID, appID s
 
 // SaveRiskFlags records any hard flags triggered.
 func (r *CreditRepository) SaveRiskFlags(ctx context.Context, distributorID, appID string, flags []string) error {
+	// Deactivate existing active risk flags for this distributor to support dynamic re-evaluation
+	_, _ = r.db.Exec(ctx, `UPDATE risk_flags SET is_active = false WHERE distributor_id = $1`, distributorID)
+
 	for _, flag := range flags {
 		_, err := r.db.Exec(ctx,
 			`INSERT INTO risk_flags (distributor_id, application_id, flag_code, flag_description, severity, triggered_by)
@@ -263,6 +275,44 @@ func (r *CreditRepository) GetAgreementByDistributor(ctx context.Context, distri
 		return nil, nil
 	}
 	return a, err
+}
+
+func (r *CreditRepository) GetActiveRiskFlags(ctx context.Context, distributorID string) ([]string, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT flag_code FROM risk_flags WHERE distributor_id = $1 AND is_active = true`, distributorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var flags []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err == nil {
+			flags = append(flags, code)
+		}
+	}
+	return flags, nil
+}
+
+func (r *CreditRepository) GetScoreComponents(ctx context.Context, appID string) (map[string]int, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT c.component_name, c.weighted_score 
+		 FROM credit_score_components c
+		 JOIN credit_scores s ON c.credit_score_id = s.id
+		 WHERE s.application_id = $1`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	comps := make(map[string]int)
+	for rows.Next() {
+		var name string
+		var score int
+		if err := rows.Scan(&name, &score); err == nil {
+			comps[name] = score
+		}
+	}
+	return comps, nil
 }
 
 func (r *CreditRepository) SignAgreement(ctx context.Context, agreementID, providerRef string) error {

@@ -152,6 +152,18 @@ func (r *DistributorRepository) GetActiveApplication(ctx context.Context, distri
 	return scanApplication(row)
 }
 
+func (r *DistributorRepository) GetLatestApplication(ctx context.Context, distributorID string) (*ApplicationRecord, error) {
+	row := r.db.QueryRow(ctx,
+		`SELECT id, distributor_id, status, payment_preference, exposure_class,
+		        is_duplicate_suspect, duplicate_reason, submitted_at, created_at, updated_at
+		 FROM applications
+		 WHERE distributor_id = $1
+		 ORDER BY created_at DESC LIMIT 1`,
+		distributorID,
+	)
+	return scanApplication(row)
+}
+
 func (r *DistributorRepository) GetApplicationByID(ctx context.Context, id string) (*ApplicationRecord, error) {
 	row := r.db.QueryRow(ctx,
 		`SELECT id, distributor_id, status, payment_preference, exposure_class,
