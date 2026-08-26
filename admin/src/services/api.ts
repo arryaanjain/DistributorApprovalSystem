@@ -14,6 +14,21 @@ export function clearAuthToken() {
 }
 
 let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (token: string) => void;
+  reject: (err: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else if (token) {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
@@ -32,7 +47,27 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers,
   });
 
-  if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh') && !isRefreshing) {
+  if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh')) {
+    if (isRefreshing) {
+      return new Promise<string>((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then((newToken) => {
+        headers['Authorization'] = `Bearer ${newToken}`;
+        return fetch(`${API_BASE}${path}`, {
+          ...options,
+          credentials: 'include',
+          headers,
+        }).then(async (retryRes) => {
+          const body = await retryRes.json().catch(() => ({}));
+          if (!retryRes.ok) {
+            const errorMsg = body?.error?.message || body?.message || retryRes.statusText || 'API Request Failed';
+            throw new Error(errorMsg);
+          }
+          return body.data !== undefined ? body.data : body;
+        });
+      });
+    }
+
     isRefreshing = true;
     try {
       const refreshRes = await fetch(`${API_BASE}/auth/employee/refresh`, {
@@ -45,6 +80,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       if (refreshRes.ok && (refreshData.access_token || refreshData.token)) {
         const newAccess = refreshData.access_token || refreshData.token;
         setAuthToken(newAccess);
+        processQueue(null, newAccess);
         headers['Authorization'] = `Bearer ${newAccess}`;
         res = await fetch(`${API_BASE}${path}`, {
           ...options,
@@ -52,13 +88,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
           headers,
         });
       } else {
+        const err = new Error('Session expired. Please log in again.');
+        processQueue(err, null);
         clearAuthToken();
         localStorage.removeItem('kresconet_admin_user');
         window.location.href = '/';
-        throw new Error('Session expired. Please log in again.');
+        throw err;
       }
     } catch (err) {
       isRefreshing = false;
+      processQueue(err, null);
       clearAuthToken();
       localStorage.removeItem('kresconet_admin_user');
       window.location.href = '/';
