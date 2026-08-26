@@ -25,6 +25,8 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
   };
 
   const currentProgressIdx = getStepProgressIndex() + 1;
+  const currentStepInfo = Object.values(STEP_LABELS).find((s) => s.num === currentProgressIdx);
+  const progressPercent = Math.round((currentProgressIdx / 9) * 100);
 
   const handleStepClick = (num: number) => {
     if (onStepClick && num <= stepKeys.length) {
@@ -33,9 +35,58 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
   };
 
   return (
-    <div className="mb-8">
-      {/* Step Progress Bar */}
-      <div className="flex items-center justify-between mb-4 overflow-x-auto py-2">
+    <div className="mb-6 sm:mb-8 space-y-3">
+      {/* MOBILE COMPACT STEP INDICATOR HEADER (< lg) */}
+      <div className="block lg:hidden bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-xs font-bold font-mono">
+              Step {currentProgressIdx} of 9
+            </span>
+            <h3 className="text-sm font-bold text-white tracking-tight">
+              {currentStepInfo?.title || "Onboarding Step"}
+            </h3>
+          </div>
+          <span className="text-xs font-bold text-emerald-400 font-mono">
+            {progressPercent}%
+          </span>
+        </div>
+
+        {/* Scrollable Pills Carousel on Mobile */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none touch-pan-x -mx-1 px-1 py-1">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+            const isDone = num < currentProgressIdx;
+            const isCurrent = num === currentProgressIdx;
+            const stepTitle = Object.values(STEP_LABELS).find((s) => s.num === num)?.title;
+
+            return (
+              <button
+                key={num}
+                onClick={() => handleStepClick(num)}
+                disabled={!onStepClick}
+                type="button"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all touch-manipulation min-h-[34px] ${
+                  isDone
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : isCurrent
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                    : "bg-slate-800/60 text-slate-500 border border-slate-700/50"
+                }`}
+              >
+                {isDone ? (
+                  <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                ) : (
+                  <span className="font-mono text-[10px]">{num}.</span>
+                )}
+                <span>{stepTitle}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* DESKTOP FULL PIPELINE STEP BAR (>= lg) */}
+      <div className="hidden lg:flex items-center justify-between overflow-x-auto py-2">
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
           const isDone = num < currentProgressIdx;
           const isCurrent = num === currentProgressIdx;
@@ -45,7 +96,11 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
             <div
               key={num}
               onClick={() => handleStepClick(num)}
-              title={isClickable ? `Jump to ${Object.values(STEP_LABELS).find((s) => s.num === num)?.title}` : undefined}
+              title={
+                isClickable
+                  ? `Jump to ${Object.values(STEP_LABELS).find((s) => s.num === num)?.title}`
+                  : undefined
+              }
               className={`flex items-center gap-2 min-w-max ${
                 isClickable ? "cursor-pointer group select-none" : ""
               }`}
@@ -78,9 +133,10 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
         })}
       </div>
 
+      {/* HORIZONTAL PROGRESS BAR */}
       <div className="w-full bg-slate-800/80 h-2 rounded-full overflow-hidden">
         <div
-          className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full transition-all duration-500"
+          className="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full transition-all duration-500"
           style={{ width: `${currentProgressIdx * 11.11}%` }}
         />
       </div>

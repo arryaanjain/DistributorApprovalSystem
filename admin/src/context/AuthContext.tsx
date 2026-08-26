@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api, getAuthToken, setAuthToken, clearAuthToken } from '../services/api';
+import { api, getAuthToken, getRefreshToken, setAuthToken, clearAuthToken } from '../services/api';
 
 interface AuthUser {
   id: string;
@@ -10,7 +10,7 @@ interface AuthUser {
 interface AuthContextType {
   isAuthenticated: boolean;
   user: AuthUser | null;
-  login: (token: string, user: AuthUser) => void;
+  login: (token: string, user: AuthUser, refreshToken?: string) => void;
   logout: () => void;
 }
 
@@ -25,35 +25,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const token = getAuthToken();
-    if (token) {
-      setIsAuthenticated(true);
-    } else {
+
+    const attemptRefresh = () => {
       const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1';
+      const storedRefreshToken = getRefreshToken();
       fetch(`${apiBase}/auth/employee/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: storedRefreshToken || '' }),
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error('Refresh failed');
+          return res.json();
+        })
         .then((data) => {
           const newAccess = data.access_token || data.token;
           if (newAccess) {
-            setAuthToken(newAccess);
+            setAuthToken(newAccess, data.refresh_token);
             if (data.user) {
               setUser(data.user);
               localStorage.setItem('kresconet_admin_user', JSON.stringify(data.user));
             }
             setIsAuthenticated(true);
           } else {
+            clearAuthToken();
             setIsAuthenticated(false);
           }
         })
-        .catch(() => setIsAuthenticated(false));
+        .catch(() => {
+          clearAuthToken();
+          setIsAuthenticated(false);
+        });
+    };
+
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const exp = payload.exp * 1000;
+        if (Date.now() >= exp - 30000) {
+          // Token is expired or expiring in less than 30s
+          attemptRefresh();
+        } else {
+          setIsAuthenticated(true);
+        }
+      } catch {
+        attemptRefresh();
+      }
+    } else {
+      attemptRefresh();
     }
   }, []);
 
-  const login = (token: string, userData: AuthUser) => {
-    setAuthToken(token);
+  const login = (token: string, userData: AuthUser, refreshToken?: string) => {
+    setAuthToken(token, refreshToken);
     setUser(userData);
     localStorage.setItem('kresconet_admin_user', JSON.stringify(userData));
     setIsAuthenticated(true);

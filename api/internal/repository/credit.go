@@ -323,3 +323,29 @@ func (r *CreditRepository) SignAgreement(ctx context.Context, agreementID, provi
 		providerRef, agreementID)
 	return err
 }
+
+type DashboardStats struct {
+	TotalApplications     int   `json:"total_applications"`
+	PendingVerifications  int   `json:"pending_verifications"`
+	TotalDistributors     int   `json:"total_distributors"`
+	SanctionedCreditPaise int64 `json:"sanctioned_credit_paise"`
+	UtilizedCreditPaise   int64 `json:"utilized_credit_paise"`
+	AvailableCreditPaise  int64 `json:"available_credit_paise"`
+}
+
+func (r *CreditRepository) GetDashboardStats(ctx context.Context) (*DashboardStats, error) {
+	stats := &DashboardStats{}
+
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM applications`).Scan(&stats.TotalApplications)
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'basic_submitted', 'business_submitted', 'preference_submitted', 'statutory_submitted', 'consent_given', 'under_review', 'hold')`).Scan(&stats.PendingVerifications)
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM distributors`).Scan(&stats.TotalDistributors)
+
+	_ = r.db.QueryRow(ctx, `SELECT COALESCE(SUM(approved_limit_paise), 0), COALESCE(SUM(current_credit_paise), 0), COALESCE(SUM(available_credit_paise), 0) FROM credit_accounts`).Scan(&stats.SanctionedCreditPaise, &stats.UtilizedCreditPaise, &stats.AvailableCreditPaise)
+
+	if stats.SanctionedCreditPaise == 0 {
+		_ = r.db.QueryRow(ctx, `SELECT COALESCE(SUM(approved_limit_paise), 0) FROM credit_decisions WHERE eligibility = 'credit'`).Scan(&stats.SanctionedCreditPaise)
+	}
+
+	return stats, nil
+}
+

@@ -18,10 +18,11 @@ type Config struct {
 	Redis    RedisConfig
 	Surepass SurepassConfig
 	MSG91    MSG91Config
-	Notify   NotifyConfig
-	Razorpay RazorpayConfig
-	Admin    AdminConfig
-	App      AppConfig
+	Notify     NotifyConfig
+	Razorpay   RazorpayConfig
+	Shiprocket ShiprocketConfig
+	Admin      AdminConfig
+	App        AppConfig
 }
 
 type AdminConfig struct {
@@ -33,6 +34,15 @@ type RazorpayConfig struct {
 	KeyID         string `mapstructure:"RAZORPAY_KEY_ID"`
 	KeySecret     string `mapstructure:"RAZORPAY_KEY_SECRET"`
 	WebhookSecret string `mapstructure:"RAZORPAY_WEBHOOK_SECRET"`
+}
+
+type ShiprocketConfig struct {
+	Email          string `mapstructure:"SHIPROCKET_EMAIL"`
+	Password       string `mapstructure:"SHIPROCKET_PASSWORD"`
+	APIToken       string `mapstructure:"SHIPROCKET_API_TOKEN"`
+	APIURL         string `mapstructure:"SHIPROCKET_API_URL"`
+	ChannelID      string `mapstructure:"SHIPROCKET_CHANNEL_ID"`
+	PickupLocation string `mapstructure:"SHIPROCKET_PICKUP_LOCATION"`
 }
 
 type ServerConfig struct {
@@ -123,7 +133,7 @@ func Load() (*Config, error) {
 	v.SetDefault("DB_MAX_OPEN_CONNS", 25)
 	v.SetDefault("DB_MAX_IDLE_CONNS", 5)
 	v.SetDefault("MIGRATIONS_DIR", "./internal/database/migrations")
-	v.SetDefault("JWT_ACCESS_EXPIRY", "15m")
+	v.SetDefault("JWT_ACCESS_EXPIRY", "24h")
 	v.SetDefault("JWT_REFRESH_EXPIRY", "168h") // 7 days
 	v.SetDefault("OTP_LENGTH", 6)
 	v.SetDefault("OTP_EXPIRY", "5m")
@@ -138,6 +148,8 @@ func Load() (*Config, error) {
 	v.SetDefault("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 	v.SetDefault("SUREPASS_BASE_URL", "https://kyc-api.surepass.io/api/v1")
 	v.SetDefault("SUREPASS_CIBIL_BASE_URL", "https://app.surepass.app/production/api/v1")
+	v.SetDefault("SHIPROCKET_API_URL", "https://apiv2.shiprocket.in/v1")
+	v.SetDefault("SHIPROCKET_PICKUP_LOCATION", "Primary")
 
 	// Load .env file if present (non-fatal if missing)
 	v.SetConfigFile(".env")
@@ -198,6 +210,13 @@ func Load() (*Config, error) {
 	cfg.Razorpay.KeyID = v.GetString("RAZORPAY_KEY_ID")
 	cfg.Razorpay.KeySecret = v.GetString("RAZORPAY_KEY_SECRET")
 	cfg.Razorpay.WebhookSecret = v.GetString("RAZORPAY_WEBHOOK_SECRET")
+
+	cfg.Shiprocket.Email = v.GetString("SHIPROCKET_EMAIL")
+	cfg.Shiprocket.Password = v.GetString("SHIPROCKET_PASSWORD")
+	cfg.Shiprocket.APIToken = v.GetString("SHIPROCKET_API_TOKEN")
+	cfg.Shiprocket.APIURL = v.GetString("SHIPROCKET_API_URL")
+	cfg.Shiprocket.ChannelID = v.GetString("SHIPROCKET_CHANNEL_ID")
+	cfg.Shiprocket.PickupLocation = v.GetString("SHIPROCKET_PICKUP_LOCATION")
 
 	cfg.Admin.Email = v.GetString("ADMIN_EMAIL")
 	cfg.Admin.Password = v.GetString("ADMIN_PASSWORD")

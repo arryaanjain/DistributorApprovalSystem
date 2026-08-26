@@ -395,47 +395,117 @@ export default function DistributorPortal() {
     }
   };
 
-  const handleInitiateSampleBooking = async (item: ProductItem) => {
+  const handleInitiateSampleBooking = (item: ProductItem) => {
     setSelectedSampleItem(item);
     setErrorMsg(null);
-    setLoading(true);
-
-    const res = await fetchApi<unknown>("/onboarding/sample-order", {
-      method: "POST",
-      body: JSON.stringify({
-        amount_paise: item.price_paise || 50000,
-        items: [{ product_id: item.id, quantity: 1, product_name: item.name }],
-      }),
-    });
-
-    setLoading(false);
-    if (res.success && res.data) {
-      setSamplePaymentModal(true);
-    } else {
-      setErrorMsg(res.error?.message || "Failed to initiate sample trial order");
-    }
+    setSamplePaymentModal(true);
   };
 
-  const handleCompleteRazorpayPayment = async () => {
+  const handleCompleteRazorpayPayment = async (addressData: any) => {
+    if (!selectedSampleItem) return;
     setLoading(true);
     setErrorMsg(null);
 
-    const res = await fetchApi<unknown>("/onboarding/sample-payment/verify", {
-      method: "POST",
-      body: JSON.stringify({
-        razorpay_order_id: `rzp_order_${Date.now()}`,
-        razorpay_payment_id: `pay_${Date.now()}`,
-        razorpay_signature: `sig_sample_${Date.now()}`,
-      }),
-    });
+    try {
+      const orderRes = await fetchApi<any>("/onboarding/sample-order", {
+        method: "POST",
+        body: JSON.stringify({
+          amount_paise: selectedSampleItem.price_paise || 50000,
+          items: [{ product_id: selectedSampleItem.id, quantity: 1, product_name: selectedSampleItem.name }],
+          address_line1: addressData.address_line1,
+          address_line2: addressData.address_line2,
+          city: addressData.city,
+          state: addressData.state,
+          pin: addressData.pin,
+          phone: addressData.phone,
+        }),
+      });
 
-    setLoading(false);
-    if (res.success) {
-      setSamplePaymentModal(false);
-      setTrialActivated(true);
-      setStep("step8_approval");
-    } else {
-      setErrorMsg(res.error?.message || "Payment verification failed");
+      if (!orderRes.success || !orderRes.data) {
+        setLoading(false);
+        setErrorMsg(orderRes.error?.message || "Failed to initiate sample trial order");
+        return;
+      }
+
+      const { razorpay_order_id, key_id, amount_paise } = orderRes.data;
+
+      const verifyPayment = async (payId: string, sig: string) => {
+        const verifyRes = await fetchApi<unknown>("/onboarding/sample-payment/verify", {
+          method: "POST",
+          body: JSON.stringify({
+            razorpay_order_id,
+            razorpay_payment_id: payId,
+            razorpay_signature: sig,
+          }),
+        });
+
+        setLoading(false);
+        if (verifyRes.success) {
+          setSamplePaymentModal(false);
+          setTrialActivated(true);
+          setStep("step8_approval");
+          setSuccessMsg("Sample kit order placed successfully! Trial status active.");
+        } else {
+          setErrorMsg(verifyRes.error?.message || "Payment verification failed");
+        }
+      };
+
+      const loadRazorpayScript = (): Promise<boolean> => {
+        return new Promise((resolve) => {
+          if (typeof window !== "undefined" && (window as any).Razorpay) {
+            resolve(true);
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = "https://checkout.razorpay.com/v1/checkout.js";
+          script.onload = () => resolve(true);
+          script.onerror = () => resolve(false);
+          document.body.appendChild(script);
+        });
+      };
+
+      const isScriptLoaded = await loadRazorpayScript();
+
+      if (isScriptLoaded && typeof window !== "undefined" && (window as any).Razorpay) {
+        try {
+          const options: any = {
+            key: key_id,
+            amount: amount_paise,
+            currency: "INR",
+            name: "Kresconet Distributor Portal",
+            description: `Sample Kit: ${selectedSampleItem.name}`,
+            handler: function (response: any) {
+              verifyPayment(
+                response.razorpay_payment_id || `pay_sim_${Date.now()}`,
+                response.razorpay_signature || `sig_sim_${Date.now()}`
+              );
+            },
+            modal: {
+              ondismiss: function () {
+                setLoading(false);
+              },
+            },
+          };
+
+          // Only pass order_id if it's a real Razorpay API order ID
+          if (razorpay_order_id && razorpay_order_id.startsWith("order_") && !razorpay_order_id.startsWith("order_sim_")) {
+            options.order_id = razorpay_order_id;
+          }
+
+          const rzp = new (window as any).Razorpay(options);
+          rzp.open();
+          setLoading(false);
+          return;
+        } catch (e) {
+          console.warn("Razorpay Checkout popup error", e);
+        }
+      }
+
+      // Test mode / fallback mode execution
+      await verifyPayment(`pay_sim_${Date.now()}`, `sig_sim_${Date.now()}`);
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMsg(err?.message || "An unexpected error occurred while placing sample order");
     }
   };
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/middleware"
@@ -50,6 +51,17 @@ func (h *OrderHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, orders)
+}
+
+// GET /api/v1/orders/samples/mine
+func (h *OrderHandler) ListMySampleOrders(w http.ResponseWriter, r *http.Request) {
+	distID := middleware.DistributorIDFromContext(r.Context())
+	samples, err := h.svc.ListMySampleOrders(r.Context(), distID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	response.JSON(w, samples)
 }
 
 type paymentProofReq struct {
@@ -121,8 +133,52 @@ func (h *OrderHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, map[string]string{"message": "order dispatched and credit account balance updated"})
 }
 
+func getQueryInt(r *http.Request, key string, defaultVal int) int {
+	valStr := r.URL.Query().Get(key)
+	if valStr == "" {
+		return defaultVal
+	}
+	var val int
+	if _, err := fmt.Sscanf(valStr, "%d", &val); err != nil {
+		return defaultVal
+	}
+	return val
+}
+
+// GET /api/v1/orders/all
+func (h *OrderHandler) ListAll(w http.ResponseWriter, r *http.Request) {
+	limit := getQueryInt(r, "limit", 50)
+	offset := getQueryInt(r, "offset", 0)
+
+	orders, total, err := h.svc.ListAllCatalogOrders(r.Context(), limit, offset)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	response.JSON(w, map[string]interface{}{
+		"orders": orders,
+		"total":  total,
+	})
+}
+
+// GET /api/v1/orders/samples
+func (h *OrderHandler) ListSampleOrdersAdmin(w http.ResponseWriter, r *http.Request) {
+	limit := getQueryInt(r, "limit", 50)
+	offset := getQueryInt(r, "offset", 0)
+
+	samples, total, err := h.svc.ListAllSampleOrders(r.Context(), limit, offset)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	response.JSON(w, map[string]interface{}{
+		"sample_orders": samples,
+		"total":         total,
+	})
+}
+
 // Stubs for legacy registry methods
-func (h *OrderHandler) GetMine(w http.ResponseWriter, r *http.Request)      { stub(w, r) }
-func (h *OrderHandler) ListAll(w http.ResponseWriter, r *http.Request)      { stub(w, r) }
-func (h *OrderHandler) AdminGet(w http.ResponseWriter, r *http.Request)     { stub(w, r) }
+func (h *OrderHandler) GetMine(w http.ResponseWriter, r *http.Request)        { stub(w, r) }
+func (h *OrderHandler) AdminGet(w http.ResponseWriter, r *http.Request)       { stub(w, r) }
 func (h *OrderHandler) VerifyPayment(w http.ResponseWriter, r *http.Request) { stub(w, r) }
+

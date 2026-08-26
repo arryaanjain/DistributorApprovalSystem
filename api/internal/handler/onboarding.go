@@ -217,11 +217,15 @@ func (h *OnboardingHandler) CreateSampleOrder(w http.ResponseWriter, r *http.Req
 	}
 
 	keyID := "rzp_test_kresconet_key"
+	keySecret := "rzp_test_kresconet_secret"
 	if h.cfg != nil && h.cfg.Razorpay.KeyID != "" {
 		keyID = h.cfg.Razorpay.KeyID
 	}
+	if h.cfg != nil && h.cfg.Razorpay.KeySecret != "" {
+		keySecret = h.cfg.Razorpay.KeySecret
+	}
 
-	res, err := h.svc.CreateSampleOrder(r.Context(), distID, &req, keyID)
+	res, err := h.svc.CreateSampleOrder(r.Context(), distID, &req, keyID, keySecret)
 	if err != nil {
 		writeAppError(w, err)
 		return

@@ -26,23 +26,24 @@ export const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [appData, distData] = await Promise.all([
+      const [appData, distData, dbStats] = await Promise.all([
         api.listApplications('all', 10, 0).catch(() => ({ applications: [], total: 0 })),
         api.listDistributors(100, 0).catch(() => ({ distributors: [], total: 0 })),
+        api.getDashboardStats().catch(() => null),
       ]);
 
       const apps = appData.applications || [];
       const dists = distData.distributors || [];
 
-      const pending = apps.filter((a: any) => 
-        ['submitted', 'consent_given', 'preference_submitted', 'hold'].includes(a.status)
+      const pending = dbStats?.pending_verifications ?? apps.filter((a: any) => 
+        ['submitted', 'basic_submitted', 'business_submitted', 'preference_submitted', 'statutory_submitted', 'consent_given', 'under_review', 'hold'].includes(a.status)
       ).length;
 
       setStats({
-        totalDistributors: distData.total || dists.length,
-        totalApplications: appData.total || apps.length,
+        totalDistributors: dbStats?.total_distributors ?? (distData.total || dists.length),
+        totalApplications: dbStats?.total_applications ?? (appData.total || apps.length),
         pendingVerifications: pending,
-        approvedLimitTotal: 15000000, // ₹1.5 Cr default limit pool representation
+        approvedLimitTotal: dbStats?.sanctioned_credit_paise ?? 0,
       });
 
       setRecentApps(apps.slice(0, 5));
@@ -56,6 +57,18 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  const formatCreditPool = (paise: number) => {
+    if (!paise || paise === 0) return '₹0';
+    const rupees = paise / 100;
+    if (rupees >= 10000000) {
+      return `₹${(rupees / 10000000).toFixed(2)} Cr`;
+    }
+    if (rupees >= 100000) {
+      return `₹${(rupees / 100000).toFixed(2)} Lakh`;
+    }
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(rupees);
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -141,7 +154,7 @@ export const Dashboard: React.FC = () => {
               <IndianRupee className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-black text-violet-300">₹1.5 Cr</p>
+          <p className="text-3xl font-black text-violet-300">{formatCreditPool(stats.approvedLimitTotal)}</p>
           <p className="text-xs text-slate-400 mt-3 font-medium">Total sanctioned exposure</p>
         </div>
       </div>

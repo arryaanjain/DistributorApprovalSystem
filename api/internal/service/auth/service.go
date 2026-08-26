@@ -161,7 +161,10 @@ func (s *Service) VerifyOTP(ctx context.Context, mobile, otp, purpose string) (*
 		return nil, apperrors.Internal("issuing access token", err)
 	}
 
-	// Issue long-lived 1-month refresh token in Postgres DB
+	// Issue long-lived 1-month refresh token in Postgres DB after revoking old sessions
+	if s.refreshTokenRepo != nil {
+		_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, dist.ID, "distributor")
+	}
 	refreshTokenStr, err := crypto.GenerateToken(32)
 	if err != nil {
 		return nil, apperrors.Internal("generating refresh token", err)
@@ -171,6 +174,7 @@ func (s *Service) VerifyOTP(ctx context.Context, mobile, otp, purpose string) (*
 		if err := s.refreshTokenRepo.Create(ctx, refreshTokenStr, dist.ID, "distributor", mobile, "", refreshExpiry); err != nil {
 			slog.Error("failed to store distributor refresh token in DB", "error", err, "distributor_id", dist.ID)
 		}
+		go func() { _ = s.refreshTokenRepo.DeleteExpired(context.Background()) }()
 	}
 
 	return &VerifyOTPResult{
@@ -199,9 +203,15 @@ func (s *Service) issueDistributorToken(distributorID, mobile string) (string, e
 
 // EmployeeLoginResult holds tokens for an authenticated employee.
 type EmployeeLoginResult struct {
+	AccessToken  string          `json:"access_token"`
+	RefreshToken string          `json:"refresh_token"`
+	User         EmployeeProfile `json:"user"`
+}
+
+// RefreshResult holds rotated access and refresh tokens.
+type RefreshResult struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	User         EmployeeProfile `json:"user"`
 }
 
 // EmployeeProfile is safe to return to the frontend (no password hash).
@@ -231,7 +241,10 @@ func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*E
 		return nil, apperrors.Internal("issuing access token", err)
 	}
 
-	// Generate 1-month long-lived refresh token in Postgres DB
+	// Revoke previous active sessions for employee & issue fresh 1-month refresh token
+	if s.refreshTokenRepo != nil {
+		_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, user.ID, "employee")
+	}
 	refreshTokenStr, err := crypto.GenerateToken(32)
 	if err != nil {
 		return nil, apperrors.Internal("generating refresh token", err)
@@ -241,6 +254,7 @@ func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*E
 		if err := s.refreshTokenRepo.Create(ctx, refreshTokenStr, user.ID, "employee", user.Email, user.Role, refreshExpiry); err != nil {
 			slog.Error("failed to store employee refresh token in DB", "error", err, "user_id", user.ID)
 		}
+		go func() { _ = s.refreshTokenRepo.DeleteExpired(context.Background()) }()
 	}
 
 	_ = s.userRepo.UpdateLastLogin(ctx, user.ID)
@@ -252,54 +266,89 @@ func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*E
 	}, nil
 }
 
-// RefreshToken validates a long-lived Postgres DB refresh token and issues a new access token.
-// The refresh token itself is NOT rotated — it gracefully expires after 1 month.
-func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (string, error) {
+// RefreshToken validates a long-lived Postgres DB refresh token, rotates it (issues a NEW refresh token + access token), and revokes the old refresh token.
+func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*RefreshResult, error) {
 	if refreshTokenStr == "" {
-		return "", apperrors.Unauthorized("missing refresh token")
+		return nil, apperrors.Unauthorized("missing refresh token")
 	}
 
 	if s.refreshTokenRepo == nil {
-		return "", apperrors.Unauthorized("refresh token repo unavailable")
+		return nil, apperrors.Unauthorized("refresh token repo unavailable")
 	}
 
 	rec, err := s.refreshTokenRepo.GetValid(ctx, refreshTokenStr)
 	if err != nil {
-		return "", apperrors.Internal("verifying refresh token from DB", err)
+		return nil, apperrors.Internal("verifying refresh token from DB", err)
 	}
+
+	// Reuse detection: if token is not valid, check if it was previously revoked (potential theft attack)
 	if rec == nil {
-		return "", apperrors.Unauthorized("refresh token expired or invalid, please login again")
+		anyRec, _ := s.refreshTokenRepo.GetAny(ctx, refreshTokenStr)
+		if anyRec != nil && anyRec.Revoked {
+			slog.Warn("REVOKED REFRESH TOKEN REUSE DETECTED! Revoking all sessions for subject",
+				"subject_id", anyRec.SubjectID, "subject_type", anyRec.SubjectType)
+			_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
+		}
+		return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
+	}
+
+	var newAccessToken string
+	var newRefreshTokenStr string
+	refreshExpiry := time.Now().Add(30 * 24 * time.Hour)
+
+	// Revoke the used refresh token (Token Rotation)
+	_ = s.refreshTokenRepo.Revoke(ctx, refreshTokenStr)
+
+	newRefreshTokenStr, err = crypto.GenerateToken(32)
+	if err != nil {
+		return nil, apperrors.Internal("generating rotated refresh token", err)
 	}
 
 	if rec.SubjectType == "employee" {
 		user, err := s.userRepo.GetByID(ctx, rec.SubjectID)
 		if err != nil || user == nil || !user.IsActive {
-			return "", apperrors.Unauthorized("employee account is inactive or not found")
+			return nil, apperrors.Unauthorized("employee account is inactive or not found")
 		}
-		return s.issueEmployeeToken(user.ID, user.Email, user.Role, s.cfg.JWT.AccessExpiry)
+		newAccessToken, err = s.issueEmployeeToken(user.ID, user.Email, user.Role, s.cfg.JWT.AccessExpiry)
+		if err != nil {
+			return nil, apperrors.Internal("issuing employee access token", err)
+		}
+		_ = s.refreshTokenRepo.Create(ctx, newRefreshTokenStr, user.ID, "employee", user.Email, user.Role, refreshExpiry)
 	} else if rec.SubjectType == "distributor" {
 		dist, err := s.distRepo.GetByID(ctx, rec.SubjectID)
 		if err != nil || dist == nil {
-			return "", apperrors.Unauthorized("distributor account not found")
+			return nil, apperrors.Unauthorized("distributor account not found")
 		}
-		return s.issueDistributorToken(dist.ID, dist.Mobile)
+		newAccessToken, err = s.issueDistributorToken(dist.ID, dist.Mobile)
+		if err != nil {
+			return nil, apperrors.Internal("issuing distributor access token", err)
+		}
+		_ = s.refreshTokenRepo.Create(ctx, newRefreshTokenStr, dist.ID, "distributor", dist.Mobile, "", refreshExpiry)
+	} else {
+		return nil, apperrors.Unauthorized("invalid subject type for refresh token")
 	}
 
-	return "", apperrors.Unauthorized("invalid subject type for refresh token")
+	return &RefreshResult{
+		AccessToken:  newAccessToken,
+		RefreshToken: newRefreshTokenStr,
+	}, nil
 }
 
 // RefreshEmployeeToken is a wrapper for employee refresh calls.
-func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (string, error) {
+func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (*RefreshResult, error) {
 	return s.RefreshToken(ctx, refreshToken)
 }
 
-// Logout revokes a refresh token in the database.
-func (s *Service) Logout(ctx context.Context, refreshToken string) error {
-	if refreshToken == "" {
+// Logout revokes all sessions for the subject and/or the specific refresh token in the database.
+func (s *Service) Logout(ctx context.Context, refreshTokenStr, subjectID, subjectType string) error {
+	if s.refreshTokenRepo == nil {
 		return nil
 	}
-	if s.refreshTokenRepo != nil {
-		return s.refreshTokenRepo.Revoke(ctx, refreshToken)
+	if subjectID != "" && subjectType != "" {
+		_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, subjectID, subjectType)
+	}
+	if refreshTokenStr != "" {
+		_ = s.refreshTokenRepo.Revoke(ctx, refreshTokenStr)
 	}
 	return nil
 }

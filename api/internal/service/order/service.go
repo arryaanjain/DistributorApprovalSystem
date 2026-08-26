@@ -151,6 +151,19 @@ func (s *Service) ListMyOrders(ctx context.Context, distributorID string) ([]rep
 	return s.orderRepo.ListOrdersByDistributor(ctx, distributorID)
 }
 
+func (s *Service) ListMySampleOrders(ctx context.Context, distributorID string) ([]repository.SampleOrderRecord, error) {
+	return s.orderRepo.ListSampleOrdersByDistributor(ctx, distributorID)
+}
+
 func (s *Service) ListPendingReviews(ctx context.Context) ([]repository.OrderRecord, error) {
 	return s.orderRepo.ListOrdersForReview(ctx)
 }
+
+func (s *Service) ListAllCatalogOrders(ctx context.Context, limit, offset int) ([]repository.OrderRecord, int, error) {
+	return s.orderRepo.ListAllCatalogOrdersAdmin(ctx, limit, offset)
+}
+
+func (s *Service) ListAllSampleOrders(ctx context.Context, limit, offset int) ([]repository.SampleOrderRecord, int, error) {
+	return s.orderRepo.ListSampleOrdersAdmin(ctx, limit, offset)
+}
+

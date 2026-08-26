@@ -1,6 +1,14 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ProductItem, AppStatus } from "@/types/onboarding";
-import { LogOut } from "lucide-react";
+import { fetchApi } from "@/lib/api";
+
+import { DashboardHeader } from "./dashboard/DashboardHeader";
+import { DashboardNavTabs, DashboardTabType } from "./dashboard/DashboardNavTabs";
+import { LiveOrderTrackingTab } from "./dashboard/LiveOrderTrackingTab";
+import { ProductCatalogueTab } from "./dashboard/ProductCatalogueTab";
+import { CreditFacilityTab } from "./dashboard/CreditFacilityTab";
+import { AddressDirectoryTab } from "./dashboard/AddressDirectoryTab";
+import { OrderTrackingModal } from "./dashboard/OrderTrackingModal";
 
 interface Step9DashboardProps {
   trialActivated: boolean;
@@ -15,79 +23,84 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
   appStatus,
   onSignOut,
 }) => {
-  const creditLimitPaise = appStatus?.assigned_credit_limit;
-  const isApprovedCredit =
-    appStatus?.status === "credit_active" ||
-    appStatus?.status === "approved" ||
-    appStatus?.status === "offer_generated" ||
-    appStatus?.status === "offer_accepted" ||
-    appStatus?.status === "agreement_signed";
+  const [activeTab, setActiveTab] = useState<DashboardTabType>("tracking");
+  const [catalogOrders, setCatalogOrders] = useState<any[]>([]);
+  const [sampleOrders, setSampleOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState<boolean>(true);
 
-  const renderCreditDisplay = () => {
-    if (trialActivated) return "Trial Status";
-    if (isApprovedCredit && creditLimitPaise && creditLimitPaise > 0) {
-      return `₹ ${(creditLimitPaise / 100).toLocaleString("en-IN")}`;
+  // Order Detail Modal State
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [selectedOrderType, setSelectedOrderType] = useState<"sample" | "commercial">("commercial");
+
+  const loadMyOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const [catRes, sampleRes] = await Promise.all([
+        fetchApi<any[]>("/orders"),
+        fetchApi<any[]>("/orders/samples/mine"),
+      ]);
+      if (catRes.success && Array.isArray(catRes.data)) {
+        setCatalogOrders(catRes.data);
+      }
+      if (sampleRes.success && Array.isArray(sampleRes.data)) {
+        setSampleOrders(sampleRes.data);
+      }
+    } catch (err) {
+      console.error("Failed loading order history", err);
+    } finally {
+      setLoadingOrders(false);
     }
-    if (appStatus?.status === "advance_only") {
-      return "Advance Only";
-    }
-    return "Advance / COD";
+  };
+
+  useEffect(() => {
+    loadMyOrders();
+  }, []);
+
+  const totalOrdersCount = catalogOrders.length + sampleOrders.length;
+
+  const handleSelectOrder = (order: any, type: "sample" | "commercial") => {
+    setSelectedOrder(order);
+    setSelectedOrderType(type);
   };
 
   return (
-    <div className="space-y-8">
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/20 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl">
-        <div>
-          <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-xs font-semibold uppercase">
-            {trialActivated ? "Active Trial Partner" : isApprovedCredit ? "Approved Credit Partner" : "Registered Partner"}
-          </span>
-          <h2 className="text-2xl font-bold text-white mt-2">Welcome to Kresconet Portal</h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Manage inventory orders, track credit lines, and review sample shipments.
-          </p>
-        </div>
+    <div className="space-y-6 sm:space-y-8 max-w-6xl mx-auto pb-12 px-2 sm:px-0">
+      {/* 1. Header Banner */}
+      <DashboardHeader
+        trialActivated={trialActivated}
+        appStatus={appStatus}
+        totalOrdersCount={totalOrdersCount}
+        onSignOut={onSignOut}
+      />
 
-        <div className="flex items-center gap-4">
-          <div className="bg-slate-900/80 px-6 py-4 rounded-2xl border border-slate-800 text-center">
-            <div className="text-xs text-slate-400">Available Credit</div>
-            <div className="text-xl font-extrabold text-emerald-400 mt-1">
-              {renderCreditDisplay()}
-            </div>
-          </div>
+      {/* 2. Navigation Tabs */}
+      <DashboardNavTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
-          <div className="bg-slate-900/80 px-6 py-4 rounded-2xl border border-slate-800 text-center">
-            <div className="text-xs text-slate-400">Active Orders</div>
-            <div className="text-xl font-extrabold text-white mt-1">1</div>
-          </div>
+      {/* 3. Tab Contents */}
+      {activeTab === "tracking" && (
+        <LiveOrderTrackingTab
+          sampleOrders={sampleOrders}
+          catalogOrders={catalogOrders}
+          loadingOrders={loadingOrders}
+          onRefresh={loadMyOrders}
+          onSelectOrder={handleSelectOrder}
+        />
+      )}
 
-          {onSignOut && (
-            <button
-              onClick={onSignOut}
-              type="button"
-              className="px-4 py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-2xl text-xs font-semibold transition-all flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Sign Out</span>
-            </button>
-          )}
-        </div>
-      </div>
+      {activeTab === "catalogue" && <ProductCatalogueTab regularProducts={regularProducts} />}
 
-      {/* Dashboard Catalogue Section */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl">
-        <h3 className="text-lg font-bold text-white mb-4">Quick Order Catalogue</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {regularProducts.slice(0, 6).map((p) => (
-            <div key={p.id} className="p-4 bg-slate-800/40 border border-slate-700/60 rounded-xl">
-              <div className="font-semibold text-white text-sm">{p.name}</div>
-              <div className="text-xs text-slate-400 mt-1">Category: {p.category}</div>
-              <div className="text-sm font-bold text-emerald-400 mt-3">
-                ₹{(p.price_paise / 100).toLocaleString("en-IN")}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {activeTab === "credit" && (
+        <CreditFacilityTab trialActivated={trialActivated} appStatus={appStatus} />
+      )}
+
+      {activeTab === "address" && <AddressDirectoryTab />}
+
+      {/* 4. Tracking Modal */}
+      <OrderTrackingModal
+        selectedOrder={selectedOrder}
+        selectedOrderType={selectedOrderType}
+        onClose={() => setSelectedOrder(null)}
+      />
     </div>
   );
 };

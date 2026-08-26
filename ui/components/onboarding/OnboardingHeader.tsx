@@ -27,18 +27,10 @@ export const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
 
         {token && (
           <div className="flex items-center gap-3">
-            <a
-              href="/admin"
-              target="_blank"
-              rel="noreferrer"
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg transition-colors border border-slate-700 flex items-center gap-1.5"
-            >
-              <ShieldCheck className="w-4 h-4 text-indigo-400" /> Admin Portal
-            </a>
             <button
               onClick={onSignOut}
               type="button"
-              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 touch-manipulation min-h-[38px]"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Sign Out</span>

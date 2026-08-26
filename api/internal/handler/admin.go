@@ -342,6 +342,19 @@ func (h *AdminHandler) ReloadPolicy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (r *AdminHandler) GetDashboardStats(w http.ResponseWriter, req *http.Request) {
+	if r.creditRepo == nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "credit repo not initialized")
+		return
+	}
+	stats, err := r.creditRepo.GetDashboardStats(req.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	response.JSON(w, stats)
+}
+
 func (h *AdminHandler) ListDuplicates(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, map[string]interface{}{
 		"suspects": []interface{}{},
@@ -354,3 +367,4 @@ func (h *AdminHandler) ResolveDuplicate(w http.ResponseWriter, r *http.Request) 
 		"status": "resolved",
 	})
 }
+

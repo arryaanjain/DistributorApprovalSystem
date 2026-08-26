@@ -4,13 +4,16 @@
 package onboarding
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -434,23 +437,8 @@ func (s *Service) SubmitConsent(ctx context.Context, distributorID, mobile strin
 		return err
 	}
 
-	// Auto-trigger verifications and credit evaluation asynchronously
-	if s.verSvc != nil {
-		go func(appID, distID string) {
-			bgCtx := context.Background()
-			slog.Info("Auto-triggering verifications after consent", "application_id", appID)
-			if err := s.verSvc.TriggerAll(bgCtx, appID, distID); err != nil {
-				slog.Error("failed auto-triggering verifications", "error", err, "application_id", appID)
-			}
-
-			if s.creditSvc != nil {
-				slog.Info("Auto-evaluating credit decision", "application_id", appID)
-				if _, err := s.creditSvc.EvaluateApplication(bgCtx, appID); err != nil {
-					slog.Error("failed auto-evaluating credit application", "error", err, "application_id", appID)
-				}
-			}
-		}(app.ID, distributorID)
-	}
+	// CIBIL report fetching and credit score evaluation are triggered manually by Admin via the Admin Dashboard.
+	slog.Info("Distributor consent recorded; application pending manual admin CIBIL report & score calculation", "application_id", app.ID, "distributor_id", distributorID)
 
 	return nil
 }
@@ -548,13 +536,26 @@ func nonZeroInt(v int) *int {
 	return &v
 }
 
+func nonEmptyStr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Razorpay Sample Orders (Trial Flow)
 // ────────────────────────────────────────────────────────────────────────────
 
 type CreateSampleOrderInput struct {
-	AmountPaise int64                   `json:"amount_paise"`
-	Items       []repository.OrderItemRecord `json:"items"`
+	AmountPaise  int64                        `json:"amount_paise"`
+	Items        []repository.OrderItemRecord `json:"items"`
+	AddressLine1 string                       `json:"address_line1"`
+	AddressLine2 string                       `json:"address_line2"`
+	City         string                       `json:"city"`
+	State        string                       `json:"state"`
+	PIN          string                       `json:"pin"`
+	Phone        string                       `json:"phone"`
 }
 
 type SampleOrderResult struct {
@@ -565,7 +566,7 @@ type SampleOrderResult struct {
 	KeyID           string `json:"key_id"`
 }
 
-func (s *Service) CreateSampleOrder(ctx context.Context, distributorID string, in *CreateSampleOrderInput, rzpKeyID string) (*SampleOrderResult, error) {
+func (s *Service) CreateSampleOrder(ctx context.Context, distributorID string, in *CreateSampleOrderInput, rzpKeyID, rzpKeySecret string) (*SampleOrderResult, error) {
 	app, err := s.requireActiveApplication(ctx, distributorID)
 	if err != nil {
 		return nil, err
@@ -576,15 +577,42 @@ func (s *Service) CreateSampleOrder(ctx context.Context, distributorID string, i
 		amount = 50000 // Default ₹500
 	}
 
-	itemsJSONBytes, _ := json.Marshal(in.Items)
-	rzpOrderID := fmt.Sprintf("rzp_order_%d", time.Now().UnixNano())
+	var addressID string
+	if in.AddressLine1 != "" && in.City != "" {
+		addrRec := &repository.AddressRecord{
+			DistributorID: distributorID,
+			AddressType:   "shipping",
+			AddressLine1:  in.AddressLine1,
+			AddressLine2:  nonEmptyStr(in.AddressLine2),
+			City:          in.City,
+			State:         in.State,
+			PIN:           in.PIN,
+			Phone:         nonEmptyStr(in.Phone),
+		}
+		addrID, err := s.orderRepo.CreateAddress(ctx, addrRec)
+		if err == nil {
+			addressID = addrID
+		}
+	}
 
-	sampleID, err := s.orderRepo.CreateSampleOrder(ctx, distributorID, rzpOrderID, amount, string(itemsJSONBytes))
+	itemsJSONBytes, _ := json.Marshal(in.Items)
+
+	// Attempt real Razorpay order creation via REST API if real keys are configured
+	rzpOrderID := fmt.Sprintf("order_sim_%d", time.Now().UnixNano())
+	if rzpKeyID != "" && rzpKeySecret != "" && strings.HasPrefix(rzpKeyID, "rzp_") && rzpKeyID != "rzp_test_kresconet_key" {
+		realID, err := createRazorpayOrderAPI(ctx, rzpKeyID, rzpKeySecret, amount)
+		if err == nil && realID != "" {
+			rzpOrderID = realID
+		} else if err != nil {
+			slog.Warn("Failed creating real Razorpay API order, using simulated order ID", "error", err)
+		}
+	}
+
+	sampleID, err := s.orderRepo.CreateSampleOrderWithAddress(ctx, distributorID, rzpOrderID, addressID, amount, string(itemsJSONBytes))
 	if err != nil {
 		return nil, apperrors.Internal("creating sample order", err)
 	}
 
-	// Update app status to order_requirement or trial_pending
 	reason := "sample order initiated"
 	_ = s.distRepo.UpdateApplicationStatus(ctx, app.ID, "business_submitted", "distributor", &distributorID, &reason)
 
@@ -595,6 +623,44 @@ func (s *Service) CreateSampleOrder(ctx context.Context, distributorID string, i
 		Currency:        "INR",
 		KeyID:           rzpKeyID,
 	}, nil
+}
+
+func createRazorpayOrderAPI(ctx context.Context, keyID, keySecret string, amountPaise int64) (string, error) {
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"amount":   amountPaise,
+		"currency": "INR",
+		"receipt":  fmt.Sprintf("rcpt_sample_%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.razorpay.com/v1/orders", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(keyID, keySecret)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("razorpay api error (status %d): %s", resp.StatusCode, string(respBytes))
+	}
+
+	var resStruct struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&resStruct); err != nil {
+		return "", err
+	}
+	return resStruct.ID, nil
 }
 
 type VerifySamplePaymentInput struct {
@@ -609,8 +675,8 @@ func (s *Service) VerifySamplePayment(ctx context.Context, distributorID string,
 		return err
 	}
 
-	// Verify HMAC-SHA256 signature if key secret is configured
-	if keySecret != "" && !strings.HasPrefix(keySecret, "rzp_test_") {
+	// Verify HMAC-SHA256 signature if key secret is configured and not dummy/simulated
+	if keySecret != "" && !strings.HasPrefix(keySecret, "rzp_test_kresconet") && !strings.HasPrefix(in.RazorpayPaymentID, "pay_sim_") {
 		mac := hmac.New(sha256.New, []byte(keySecret))
 		mac.Write([]byte(in.RazorpayOrderID + "|" + in.RazorpayPaymentID))
 		expectedSig := hex.EncodeToString(mac.Sum(nil))

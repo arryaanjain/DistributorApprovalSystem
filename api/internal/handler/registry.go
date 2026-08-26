@@ -33,6 +33,7 @@ type Registry struct {
 	Admin         *AdminHandler
 	Audit         *AuditHandler
 	Notification  *NotificationHandler
+	Shipping      *ShippingHandler
 }
 
 // ────────────────────────────────────────────────────────────────────────────
