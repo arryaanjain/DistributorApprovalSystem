@@ -118,7 +118,7 @@ export const Applications: React.FC = () => {
     }
   };
 
-  const handleTriggerAllVerifications = async () => {
+  const handleFetchCibilReport = async () => {
     const appId =
       appDetail?.application?.id ||
       appDetail?.application?.ID ||
@@ -135,20 +135,79 @@ export const Applications: React.FC = () => {
       appDetail?.distributor?.ID;
 
     if (!appId || !distId) {
-      console.warn('Missing appId or distId:', { appId, distId, appDetail, selectedApp });
-      setActionMessage('Cannot trigger verification: Missing Application ID or Distributor ID.');
+      setActionMessage('Cannot fetch CIBIL report: Missing Application ID or Distributor ID.');
       return;
     }
     setActionLoading(true);
-    setActionMessage('Running Auto-Verification & Credit Scoring...');
+    setActionMessage('Fetching CIBIL Credit Bureau Report via Surepass...');
+    try {
+      await api.triggerVerifications(appId, distId);
+      setActionMessage('CIBIL Credit Bureau Report fetched successfully!');
+      await loadDetail(appId);
+    } catch (err: any) {
+      console.error('CIBIL fetch failed:', err);
+      setActionMessage(`CIBIL fetch error: ${err.message || 'Unknown error'}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCalculateCreditScore = async () => {
+    const appId =
+      appDetail?.application?.id ||
+      appDetail?.application?.ID ||
+      selectedApp?.id ||
+      selectedApp?.ID ||
+      searchParams.get('id');
+
+    if (!appId) {
+      setActionMessage('Cannot calculate score: Missing Application ID.');
+      return;
+    }
+    setActionLoading(true);
+    setActionMessage('Evaluating Credit Scoring Engine...');
+    try {
+      await api.evaluateCredit(appId);
+      setActionMessage('Credit Score & Limit Decision calculated successfully!');
+      await loadDetail(appId);
+    } catch (err: any) {
+      console.error('Credit calculation failed:', err);
+      setActionMessage(`Score calculation error: ${err.message || 'Unknown error'}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleFetchCibilAndCalculateScore = async () => {
+    const appId =
+      appDetail?.application?.id ||
+      appDetail?.application?.ID ||
+      selectedApp?.id ||
+      selectedApp?.ID ||
+      searchParams.get('id');
+
+    const distId =
+      appDetail?.application?.distributor_id ||
+      appDetail?.application?.DistributorID ||
+      selectedApp?.distributor_id ||
+      selectedApp?.DistributorID ||
+      appDetail?.distributor?.id ||
+      appDetail?.distributor?.ID;
+
+    if (!appId || !distId) {
+      setActionMessage('Cannot run process: Missing Application ID or Distributor ID.');
+      return;
+    }
+    setActionLoading(true);
+    setActionMessage('Fetching CIBIL Report & Calculating Credit Score...');
     try {
       await api.triggerVerifications(appId, distId);
       await api.evaluateCredit(appId);
-      setActionMessage('Verifications & Credit Evaluation triggered successfully!');
+      setActionMessage('CIBIL Report fetched & Credit Score calculated successfully!');
       await loadDetail(appId);
     } catch (err: any) {
-      console.error('Verification trigger failed:', err);
-      setActionMessage(`Verification trigger: ${err.message || 'Unknown error'}`);
+      console.error('Process failed:', err);
+      setActionMessage(`Process error: ${err.message || 'Unknown error'}`);
     } finally {
       setActionLoading(false);
     }
@@ -159,13 +218,51 @@ export const Applications: React.FC = () => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(paise / 100);
   };
 
+  const getStepInfo = (status: string) => {
+    switch (status) {
+      case 'submitted':
+      case 'basic_submitted':
+        return { step: 1, label: 'Step 1: Business Details', badgeClass: 'bg-blue-500/10 text-blue-400 border-blue-500/20' };
+      case 'business_submitted':
+        return { step: 2, label: 'Step 2: Experience & Ops', badgeClass: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' };
+      case 'preference_submitted':
+        return { step: 3, label: 'Step 3: Credit Preference', badgeClass: 'bg-violet-500/10 text-violet-400 border-violet-500/20' };
+      case 'trial':
+        return { step: 4, label: 'Step 4: Sample Trial Active', badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20' };
+      case 'statutory_submitted':
+        return { step: 5, label: 'Step 5: KYC & GST Verified', badgeClass: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' };
+      case 'consent_given':
+        return { step: 6, label: 'Step 6: Legal Consent', badgeClass: 'bg-sky-500/10 text-sky-400 border-sky-500/20' };
+      case 'bank_submitted':
+        return { step: 7, label: 'Step 7: Bank Submitted', badgeClass: 'bg-purple-500/10 text-purple-400 border-purple-500/20' };
+      case 'under_review':
+        return { step: 8, label: 'Step 8: Under Credit Review', badgeClass: 'bg-orange-500/10 text-orange-400 border-orange-500/20' };
+      case 'hold':
+        return { step: 8, label: 'Step 8: On Hold', badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20' };
+      case 'offer_generated':
+      case 'offer_accepted':
+      case 'agreement_pending':
+      case 'agreement_signed':
+      case 'approved':
+      case 'credit_active':
+        return { step: 9, label: 'Step 9: Credit Approved', badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
+      case 'advance_only':
+        return { step: 9, label: 'Step 9: Advance Only', badgeClass: 'bg-teal-500/10 text-teal-400 border-teal-500/20' };
+      case 'rejected':
+      case 'blocked':
+        return { step: 0, label: 'Rejected', badgeClass: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
+      default:
+        return { step: 1, label: status ? status.replace('_', ' ') : 'In Review', badgeClass: 'bg-slate-500/10 text-slate-400 border-slate-500/20' };
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Distributor Applications</h1>
-          <p className="text-sm text-slate-400 mt-1">Review onboarding submissions, Surepass verifications, and credit sanction decisions.</p>
+          <p className="text-sm text-slate-400 mt-1">Review onboarding submissions, step progress, Surepass verifications, and credit sanctions.</p>
         </div>
         <div className="flex items-center gap-3">
           <select
@@ -173,12 +270,16 @@ export const Applications: React.FC = () => {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
           >
-            <option value="all">All Statuses</option>
-            <option value="consent_given">Consent Given</option>
-            <option value="preference_submitted">Preference Submitted</option>
-            <option value="approved">Approved</option>
-            <option value="credit_active">Credit Active</option>
-            <option value="hold">On Hold</option>
+            <option value="all">All Applications & Steps</option>
+            <option value="submitted">Step 1: Basic Submitted</option>
+            <option value="business_submitted">Step 2: Experience Submitted</option>
+            <option value="preference_submitted">Step 3: Preference Submitted</option>
+            <option value="trial">Step 4: Sample Trial</option>
+            <option value="statutory_submitted">Step 5: KYC & GST</option>
+            <option value="consent_given">Step 6: Consent Given</option>
+            <option value="bank_submitted">Step 7: Bank Details</option>
+            <option value="hold">Step 8: On Hold</option>
+            <option value="approved">Step 9: Approved / Active</option>
             <option value="rejected">Rejected</option>
           </select>
           <button
@@ -203,6 +304,7 @@ export const Applications: React.FC = () => {
             <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
               {applications.map((app) => {
                 const isSelected = selectedApp?.id === app.id;
+                const stepInfo = getStepInfo(app.status);
                 return (
                   <div
                     key={app.id}
@@ -222,16 +324,8 @@ export const Applications: React.FC = () => {
                     </div>
                     <p className="text-xs text-slate-400 mt-1 truncate">{app.business_name || 'Business Name Pending'}</p>
                     <div className="flex items-center justify-between mt-3">
-                      <span className="text-[10px] uppercase tracking-wider font-semibold">
-                        {['offer_generated', 'offer_accepted', 'agreement_pending', 'agreement_signed', 'approved', 'credit_active'].includes(app.status) ? (
-                          <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Completed</span>
-                        ) : app.status === 'advance_only' ? (
-                          <span className="text-sky-400 font-bold bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full">Advance Only</span>
-                        ) : app.status === 'rejected' || app.status === 'blocked' ? (
-                          <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full">Rejected</span>
-                        ) : (
-                          <span className="text-slate-400">{app.status.replace('_', ' ')}</span>
-                        )}
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${stepInfo.badgeClass}`}>
+                        {stepInfo.label}
                       </span>
                       <span className="text-[11px] text-slate-500">
                         {new Date(app.created_at).toLocaleDateString()}
@@ -256,12 +350,12 @@ export const Applications: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleTriggerAllVerifications}
+                  onClick={handleFetchCibilAndCalculateScore}
                   disabled={actionLoading}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 text-xs font-semibold border border-violet-500/30 transition-colors"
                 >
                   <Zap className="w-3.5 h-3.5 text-violet-400" />
-                  <span>{appDetail?.decision ? 'Recompute Decision' : 'Auto-Verify & Score'}</span>
+                  <span>{appDetail?.decision ? 'Recompute Decision' : 'Fetch CIBIL & Compute Score'}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -369,44 +463,78 @@ export const Applications: React.FC = () => {
                           <p className="text-[10px] text-slate-500 mt-0.5 truncate">{bankName || (bankRec ? 'Penny Drop Verified' : 'Pending')}</p>
                         </div>
 
-                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                          <p className="text-[10px] text-slate-400 font-bold uppercase">Credit Score</p>
-                          {hasScore ? (
-                            <>
-                              <p className="text-sm font-black text-indigo-400 mt-1">{bureauScore}</p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">
-                                {hasDefaults ? '⚠ Defaults' : '✓ No Defaults'}
-                              </p>
-                            </>
-                          ) : decisionScore !== undefined && decisionScore !== null ? (
-                            <>
-                              <p className="text-sm font-black text-indigo-400 mt-1">{decisionScore}</p>
-                              <p className="text-[10px] text-emerald-400 mt-0.5">Score Calculated</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-xs font-semibold text-slate-400 mt-1">Pending Run</p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">Auto-Verify to Fetch</p>
-                            </>
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-col justify-between">
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">Credit Score</p>
+                            {hasScore ? (
+                              <>
+                                <p className="text-sm font-black text-indigo-400 mt-1">{bureauScore}</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  {hasDefaults ? '⚠ Defaults' : '✓ No Defaults'}
+                                </p>
+                              </>
+                            ) : decisionScore !== undefined && decisionScore !== null ? (
+                              <>
+                                <p className="text-sm font-black text-indigo-400 mt-1">{decisionScore}</p>
+                                <p className="text-[10px] text-emerald-400 mt-0.5">Score Calculated</p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-xs font-semibold text-amber-400/90 mt-1">Not Calculated</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">Manual Run Required</p>
+                              </>
+                            )}
+                          </div>
+                          {!hasScore && decisionScore === undefined && (
+                            <button
+                              onClick={handleCalculateCreditScore}
+                              disabled={actionLoading}
+                              className="mt-2 text-[10px] px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 rounded border border-indigo-500/30 font-bold transition-all"
+                            >
+                              Calculate Score
+                            </button>
                           )}
                         </div>
                       </div>
 
                       {/* PDF Report Download Action */}
-                      {pdfUrl && (
+                      {pdfUrl ? (
                         <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
                           <div className="text-[11px] text-slate-400">
                             <span>Official CIBIL Credit Bureau Report (PDF)</span>
                           </div>
-                          <a
-                            href={pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleFetchCibilReport}
+                              disabled={actionLoading}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-all"
+                            >
+                              Refresh CIBIL
+                            </button>
+                            <a
+                              href={pdfUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download Report PDF</span>
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                          <div className="text-[11px] text-slate-400">
+                            <span className="text-slate-300 font-semibold">CIBIL Report:</span> <span className="text-amber-400 font-mono">Not Fetched Yet</span>
+                          </div>
+                          <button
+                            onClick={handleFetchCibilReport}
+                            disabled={actionLoading}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all"
                           >
                             <Download className="w-3.5 h-3.5" />
-                            <span>Download Report PDF</span>
-                          </a>
+                            <span>Fetch CIBIL Report</span>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -545,9 +673,19 @@ export const Applications: React.FC = () => {
                     </div>
                   );
                 })() : (
-                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 text-center">
-                    <p className="text-xs text-slate-400">Automated credit limit evaluation pending.</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Click <strong>Auto-Verify & Score</strong> above to run verification and generate credit offer decision.</p>
+                  <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 text-center space-y-3">
+                    <p className="text-sm font-bold text-slate-300">Automated credit limit evaluation pending manual run.</p>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      CIBIL credit report and score calculation are set to manual mode. Click below to fetch the report from Surepass and compute the credit score.
+                    </p>
+                    <button
+                      onClick={handleFetchCibilAndCalculateScore}
+                      disabled={actionLoading}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition-all"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Fetch CIBIL Report & Calculate Score</span>
+                    </button>
                   </div>
                 )}
 
