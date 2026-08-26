@@ -24,6 +24,7 @@ import (
 	svcfin "github.com/arryaanjain/DistributorApprovalSystem/internal/service/financial"
 	svconboarding "github.com/arryaanjain/DistributorApprovalSystem/internal/service/onboarding"
 	svcorder "github.com/arryaanjain/DistributorApprovalSystem/internal/service/order"
+	svcshipping "github.com/arryaanjain/DistributorApprovalSystem/internal/service/shipping"
 	svcver "github.com/arryaanjain/DistributorApprovalSystem/internal/service/verification"
 )
 
@@ -89,6 +90,7 @@ func main() {
 	agrSvc    := svcagr.New(creditRepo, distRepo, orderRepo, surepass)
 	orderSvc  := svcorder.New(orderRepo, creditRepo, distRepo)
 	finSvc    := svcfin.New(finRepo, orderRepo)
+	srSvc     := svcshipping.NewShiprocketService(&cfg.Shiprocket)
 
 	// ── Handlers ───────────────────────────────────────────────────────────
 	handlers := &handler.Registry{
@@ -107,6 +109,7 @@ func main() {
 		Collections:   handler.NewCollectionsHandler(finSvc),
 		Enhancement:   handler.NewEnhancementHandler(finSvc),
 		Admin:         handler.NewAdminHandler(distRepo, verRepo, creditRepo, verSvc, creditSvc, policyLoader),
+		Shipping:      handler.NewShippingHandler(srSvc, orderRepo),
 		// Remaining handlers — stubs until implemented
 		Risk:          &handler.RiskHandler{},
 		Outstanding:   &handler.OutstandingHandler{},
