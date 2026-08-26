@@ -174,6 +174,7 @@ func New(deps *Dependencies) http.Handler {
 				r.Use(middleware.RequireDistributor(&deps.Cfg.JWT))
 				r.Post("/", h.Order.Create)
 				r.Get("/", h.Order.ListMine)
+				r.Get("/samples/mine", h.Order.ListMySampleOrders)
 				r.Get("/{id}", h.Order.GetMine)
 				// Payment proof upload (Phase 12)
 				r.Post("/{id}/payment-proof", h.Order.SubmitPaymentProof)
@@ -182,6 +183,7 @@ func New(deps *Dependencies) http.Handler {
 				r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
 				r.Get("/pending-review", h.Order.ListPendingReview)
 				r.Get("/all", h.Order.ListAll)
+				r.Get("/samples", h.Order.ListSampleOrdersAdmin)
 				r.Get("/{id}/admin", h.Order.AdminGet)
 				// First human review (Phase 13)
 				r.Post("/{id}/review", h.Order.Review)
@@ -268,6 +270,9 @@ func New(deps *Dependencies) http.Handler {
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
 
+			// Dashboard stats
+			r.Get("/dashboard-stats", h.Admin.GetDashboardStats)
+
 			// Application pipeline
 			r.Get("/applications", h.Admin.ListApplications)
 			r.Get("/applications/{id}", h.Admin.GetApplication)
@@ -289,6 +294,29 @@ func New(deps *Dependencies) http.Handler {
 			// Duplicate suspects
 			r.Get("/duplicates", h.Admin.ListDuplicates)
 			r.Post("/duplicates/{id}/resolve", h.Admin.ResolveDuplicate)
+
+			// Manual Shiprocket Dispatch for Sample Orders
+			r.Post("/shipping/sample-dispatch", h.Shipping.DispatchSampleOrder)
+		})
+
+		// ── Shipping (Shiprocket Integration) ──────────────────────────────────
+		r.Route("/shipping", func(r chi.Router) {
+			// Webhook endpoint from Shiprocket (no employee JWT required)
+			r.Post("/webhook", h.Shipping.HandleWebhook)
+
+			// Employee logistics management
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
+				r.Post("/create/{id}", h.Shipping.CreateShipment)
+				r.Get("/wallet-balance", h.Shipping.GetWalletBalance)
+				r.Get("/couriers/{id}", h.Shipping.GetAvailableCouriers)
+				r.Post("/assign-courier/{id}", h.Shipping.AssignCourier)
+				r.Post("/pickup/{id}", h.Shipping.RequestPickup)
+				r.Get("/label/{id}", h.Shipping.GenerateLabel)
+				r.Post("/manifest/{id}", h.Shipping.GenerateManifest)
+				r.Get("/track/{id}", h.Shipping.TrackShipment)
+				r.Post("/sample-dispatch", h.Shipping.DispatchSampleOrder)
+			})
 		})
 
 		// ── Audit ──────────────────────────────────────────────────────────────
