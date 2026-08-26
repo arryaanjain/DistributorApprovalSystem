@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/apperrors"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/response"
@@ -86,7 +87,7 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "refresh_token",
 			Value:    result.RefreshToken,
-			Path:     "/api/v1/auth",
+			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   30 * 86400,
@@ -129,7 +130,7 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "refresh_token",
 			Value:    result.RefreshToken,
-			Path:     "/api/v1/auth",
+			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   30 * 86400,
@@ -151,13 +152,16 @@ type refreshRequest struct {
 
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	refreshTokenStr := ""
-	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+		refreshTokenStr = req.RefreshToken
 	}
+
 	if refreshTokenStr == "" {
-		var req refreshRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			refreshTokenStr = req.RefreshToken
+		for _, c := range r.Cookies() {
+			if c.Name == "refresh_token" && c.Value != "" {
+				refreshTokenStr = c.Value
+			}
 		}
 	}
 
@@ -166,15 +170,38 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := h.svc.RefreshToken(r.Context(), refreshTokenStr)
+	result, err := h.svc.RefreshToken(r.Context(), refreshTokenStr)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
-	response.JSON(w, map[string]string{
-		"access_token": accessToken,
-		"token":        accessToken,
+	// Purge legacy path cookie from browser
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/api/v1/auth",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+
+	if result.RefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    result.RefreshToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   30 * 86400,
+		})
+	}
+
+	response.JSON(w, map[string]interface{}{
+		"access_token":  result.AccessToken,
+		"token":         result.AccessToken,
+		"refresh_token": result.RefreshToken,
 	})
 }
 
@@ -186,19 +213,32 @@ func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshTokenStr := ""
-	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
-	}
-	if refreshTokenStr == "" {
-		var req refreshRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
 		refreshTokenStr = req.RefreshToken
 	}
 
-	if refreshTokenStr != "" {
-		_ = h.svc.Logout(r.Context(), refreshTokenStr)
+	if refreshTokenStr == "" {
+		for _, c := range r.Cookies() {
+			if c.Name == "refresh_token" && c.Value != "" {
+				refreshTokenStr = c.Value
+			}
+		}
 	}
 
+	subjectID := ""
+	subjectType := ""
+	if empID, ok := r.Context().Value("user_id").(string); ok && empID != "" {
+		subjectID = empID
+		subjectType = "employee"
+	} else if distID, ok := r.Context().Value("distributor_id").(string); ok && distID != "" {
+		subjectID = distID
+		subjectType = "distributor"
+	}
+
+	_ = h.svc.Logout(r.Context(), refreshTokenStr, subjectID, subjectType)
+
+	// Purge both / and /api/v1/auth path cookies
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
@@ -206,6 +246,16 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
 	})
 
 	response.JSON(w, map[string]string{"message": "logged out successfully"})
