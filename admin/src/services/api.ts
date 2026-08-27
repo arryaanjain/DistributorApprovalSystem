@@ -219,6 +219,9 @@ export const api = {
   getDistributor: (id: string) =>
     request<any>(`/distributors/${id}`),
 
+  getDistributorCreditTrail: (id: string) =>
+    request<{ distributor_id: string; trail: any[] }>(`/admin/distributors/${id}/credit-trail`),
+
   // Policy
   getPolicy: () =>
     request<any>('/admin/policy'),
