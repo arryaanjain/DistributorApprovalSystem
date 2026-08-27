@@ -338,14 +338,63 @@ func (r *CreditRepository) GetDashboardStats(ctx context.Context) (*DashboardSta
 
 	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM applications`).Scan(&stats.TotalApplications)
 	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'basic_submitted', 'business_submitted', 'preference_submitted', 'statutory_submitted', 'consent_given', 'under_review', 'hold')`).Scan(&stats.PendingVerifications)
-	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM distributors`).Scan(&stats.TotalDistributors)
+	
+	// Count active onboarding-completed distributors
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM distributors WHERE is_active = true`).Scan(&stats.TotalDistributors)
+	if stats.TotalDistributors == 0 {
+		_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM distributors`).Scan(&stats.TotalDistributors)
+	}
 
+	// Calculate credit account stats if accounts exist
 	_ = r.db.QueryRow(ctx, `SELECT COALESCE(SUM(approved_limit_paise), 0), COALESCE(SUM(current_credit_paise), 0), COALESCE(SUM(available_credit_paise), 0) FROM credit_accounts`).Scan(&stats.SanctionedCreditPaise, &stats.UtilizedCreditPaise, &stats.AvailableCreditPaise)
 
+	// Fallback to summing only the latest decision per distributor (preventing historical duplicates)
 	if stats.SanctionedCreditPaise == 0 {
-		_ = r.db.QueryRow(ctx, `SELECT COALESCE(SUM(approved_limit_paise), 0) FROM credit_decisions WHERE eligibility = 'credit'`).Scan(&stats.SanctionedCreditPaise)
+		query := `
+			SELECT COALESCE(SUM(approved_limit_paise), 0)
+			FROM (
+				SELECT DISTINCT ON (distributor_id) approved_limit_paise
+				FROM credit_decisions
+				WHERE eligibility = 'credit'
+				ORDER BY distributor_id, decided_at DESC
+			) latest_decisions
+		`
+		_ = r.db.QueryRow(ctx, query).Scan(&stats.SanctionedCreditPaise)
 	}
 
 	return stats, nil
+}
+
+// GetCreditDecisionTrail returns all historical credit decisions for a distributor ordered by decision date DESC.
+func (r *CreditRepository) GetCreditDecisionTrail(ctx context.Context, distributorID string) ([]CreditDecisionRecord, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT d.id, d.application_id, d.distributor_id, d.credit_score_id, d.policy_version, d.eligibility,
+		        d.approved_limit_paise, d.approved_period, d.max_outstanding_days, d.hard_flags_present, d.decided_at,
+		        COALESCE(s.total_score, 0), COALESCE(s.risk_grade::TEXT, '')
+		 FROM credit_decisions d
+		 LEFT JOIN credit_scores s ON d.credit_score_id = s.id
+		 WHERE d.distributor_id = $1
+		 ORDER BY d.decided_at DESC`, distributorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var trail []CreditDecisionRecord
+	for rows.Next() {
+		d := CreditDecisionRecord{}
+		var eligibilityStr, periodStr string
+		err := rows.Scan(&d.ID, &d.ApplicationID, &d.DistributorID, &d.CreditScoreID, &d.PolicyVersion,
+			&eligibilityStr, &d.ApprovedLimitPaise, &periodStr,
+			&d.MaxOutstandingAge, &d.HardRiskTriggered, &d.DecidedAt,
+			&d.TotalScore, &d.RiskGrade)
+		if err != nil {
+			return nil, err
+		}
+		d.Decision = eligibilityStr
+		d.PaymentTerms = periodStr
+		trail = append(trail, d)
+	}
+	return trail, nil
 }
 
