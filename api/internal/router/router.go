@@ -283,6 +283,7 @@ func New(deps *Dependencies) http.Handler {
 			// Distributor management
 			r.Get("/distributors",     h.Admin.ListDistributors)
 			r.Get("/distributors/{id}", h.Admin.GetDistributor)
+			r.Get("/distributors/{id}/credit-trail", h.Admin.GetDistributorCreditTrail)
 
 			// Policy management (super_admin only)
 			r.Group(func(r chi.Router) {
