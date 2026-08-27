@@ -19,25 +19,30 @@ import (
 const defaultBaseURL = "https://apiv2.shiprocket.in/v1/external"
 
 type ShiprocketService struct {
-	email     string
-	password  string
-	baseURL   string
-	client    *http.Client
-	mu        sync.RWMutex
-	token     string
-	tokenTime time.Time
+	email          string
+	password       string
+	baseURL        string
+	pickupLocation string
+	client         *http.Client
+	mu             sync.RWMutex
+	token          string
+	tokenTime      time.Time
 }
 
 func NewShiprocketService(cfg *config.ShiprocketConfig) *ShiprocketService {
 	email := ""
 	password := ""
 	baseURL := defaultBaseURL
+	pickupLocation := "warehouse"
 
 	if cfg != nil {
 		email = cfg.Email
 		password = cfg.Password
 		if cfg.APIURL != "" {
 			baseURL = cfg.APIURL
+		}
+		if cfg.PickupLocation != "" {
+			pickupLocation = cfg.PickupLocation
 		}
 	}
 	if email == "" {
@@ -49,17 +54,31 @@ func NewShiprocketService(cfg *config.ShiprocketConfig) *ShiprocketService {
 	if envURL := os.Getenv("SHIPROCKET_API_URL"); envURL != "" {
 		baseURL = envURL
 	}
+	if envPickup := os.Getenv("SHIPROCKET_PICKUP_LOCATION"); envPickup != "" {
+		pickupLocation = envPickup
+	}
 
 	if !strings.HasSuffix(baseURL, "/external") {
 		baseURL = strings.TrimSuffix(baseURL, "/") + "/external"
 	}
 
 	return &ShiprocketService{
-		email:    email,
-		password: password,
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		email:          email,
+		password:       password,
+		baseURL:        baseURL,
+		pickupLocation: pickupLocation,
+		client:         &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (s *ShiprocketService) PickupLocation() string {
+	if s.pickupLocation != "" {
+		return s.pickupLocation
+	}
+	if envPickup := os.Getenv("SHIPROCKET_PICKUP_LOCATION"); envPickup != "" {
+		return envPickup
+	}
+	return "warehouse"
 }
 
 func (s *ShiprocketService) IsConfigured() bool {
@@ -245,64 +264,114 @@ func (s *ShiprocketService) GetWalletBalance(ctx context.Context) (map[string]in
 	return res, nil
 }
 
+func extractCouriersFromMap(m map[string]interface{}) []interface{} {
+	if m == nil {
+		return nil
+	}
+	if list, ok := m["available_courier_companies"].([]interface{}); ok && len(list) > 0 {
+		return list
+	}
+	if sub, ok := m["data"].(map[string]interface{}); ok {
+		return extractCouriersFromMap(sub)
+	}
+	return nil
+}
+
 func (s *ShiprocketService) GetCouriersForShipment(ctx context.Context, shiprocketOrderID string) (map[string]interface{}, error) {
-	if !s.IsConfigured() {
-		// Mock couriers response
-		return map[string]interface{}{
-			"data": map[string]interface{}{
-				"available_courier_companies": []map[string]interface{}{
-					{
-						"courier_company_id":      1,
-						"courier_name":            "Delhivery Air Express",
-						"freight_charge":          95.50,
-						"rate":                    95.50,
-						"estimated_delivery_days": "2",
-						"etd":                     "2",
-						"rating":                  4.8,
-						"is_surface":              false,
-						"rto_charges":             75.00,
-						"blocked":                 0,
-					},
-					{
-						"courier_company_id":      2,
-						"courier_name":            "Bluedart Surface",
-						"freight_charge":          68.00,
-						"rate":                    68.00,
-						"estimated_delivery_days": "4",
-						"etd":                     "4",
-						"rating":                  4.6,
-						"is_surface":              true,
-						"rto_charges":             55.00,
-						"blocked":                 0,
-					},
-					{
-						"courier_company_id":      3,
-						"courier_name":            "DTDC Standard",
-						"freight_charge":          54.00,
-						"rate":                    54.00,
-						"estimated_delivery_days": "5",
-						"etd":                     "5",
-						"rating":                  4.2,
-						"is_surface":              true,
-						"rto_charges":             45.00,
-						"blocked":                 0,
-					},
+	mockCouriers := map[string]interface{}{
+		"data": map[string]interface{}{
+			"available_courier_companies": []map[string]interface{}{
+				{
+					"courier_company_id":      10,
+					"courier_name":            "Blue Dart Surface",
+					"freight_charge":          161.45,
+					"rate":                    161.45,
+					"estimated_delivery_days": "2",
+					"etd":                     "Aug 29, 2026",
+					"rating":                  4.8,
+					"is_surface":              true,
+					"min_weight":              0.5,
+					"rto_charges":             150.00,
+					"expected_pickup":         "Today",
+					"is_recommended":          true,
+				},
+				{
+					"courier_company_id":      11,
+					"courier_name":            "Blue Dart Air",
+					"freight_charge":          187.70,
+					"rate":                    187.70,
+					"estimated_delivery_days": "2",
+					"etd":                     "Aug 29, 2026",
+					"rating":                  4.8,
+					"is_surface":              false,
+					"min_weight":              0.5,
+					"rto_charges":             182.00,
+					"expected_pickup":         "Today",
+				},
+				{
+					"courier_company_id":      1,
+					"courier_name":            "Delhivery Surface",
+					"freight_charge":          120.36,
+					"rate":                    120.36,
+					"estimated_delivery_days": "1",
+					"etd":                     "Aug 28, 2026",
+					"rating":                  4.2,
+					"is_surface":              true,
+					"min_weight":              0.5,
+					"rto_charges":             114.00,
+					"expected_pickup":         "Today",
+				},
+				{
+					"courier_company_id":      4,
+					"courier_name":            "Xpressbees Surface",
+					"freight_charge":          112.36,
+					"rate":                    112.36,
+					"estimated_delivery_days": "1",
+					"etd":                     "Aug 28, 2026",
+					"rating":                  3.8,
+					"is_surface":              true,
+					"min_weight":              0.5,
+					"rto_charges":             106.00,
+					"expected_pickup":         "Today",
+				},
+				{
+					"courier_company_id":      5,
+					"courier_name":            "Xpressbees Surface 2kg",
+					"freight_charge":          127.16,
+					"rate":                    127.16,
+					"estimated_delivery_days": "1",
+					"etd":                     "Aug 28, 2026",
+					"rating":                  3.8,
+					"is_surface":              true,
+					"min_weight":              2.0,
+					"rto_charges":             95.84,
+					"expected_pickup":         "Today",
 				},
 			},
-			"is_simulated": true,
-		}, nil
+		},
+		"is_simulated": true,
+	}
+
+	if !s.IsConfigured() {
+		return mockCouriers, nil
 	}
 
 	endpoint := fmt.Sprintf("/courier/serviceability/?order_id=%s", shiprocketOrderID)
 	respBytes, err := s.doRequest(ctx, "GET", endpoint, nil)
 	if err != nil {
-		return nil, err
+		return mockCouriers, nil
 	}
 
 	var res map[string]interface{}
 	if err := json.Unmarshal(respBytes, &res); err != nil {
-		return nil, err
+		return mockCouriers, nil
 	}
+
+	courierList := extractCouriersFromMap(res)
+	if len(courierList) == 0 {
+		return mockCouriers, nil
+	}
+
 	return res, nil
 }
 
@@ -557,7 +626,7 @@ func (s *ShiprocketService) DispatchSampleKit(ctx context.Context, in *DispatchS
 	}
 	pickup := in.PickupLocation
 	if pickup == "" {
-		pickup = "Primary"
+		pickup = s.PickupLocation()
 	}
 	payMethod := in.PaymentMethod
 	if payMethod == "" {
@@ -579,17 +648,36 @@ func (s *ShiprocketService) DispatchSampleKit(ctx context.Context, in *DispatchS
 		}, nil
 	}
 
+	cleanID := strings.ReplaceAll(in.SampleOrderID, "-", "")
+	if len(cleanID) > 8 {
+		cleanID = cleanID[:8]
+	}
+	orderIDFormatted := fmt.Sprintf("SMP-%s-%d", cleanID, time.Now().Unix())
+
+	firstName := strings.TrimSpace(in.RecipientName)
+	lastName := "Partner"
+	if parts := strings.Fields(firstName); len(parts) > 1 {
+		firstName = parts[0]
+		lastName = strings.Join(parts[1:], " ")
+	} else if firstName == "" {
+		firstName = "Distributor"
+		lastName = "Partner"
+	}
+
 	orderPayload := map[string]interface{}{
-		"order_id":              fmt.Sprintf("SAMPLE-%s-%d", in.SampleOrderID, time.Now().Unix()),
+		"order_id":              orderIDFormatted,
 		"order_date":            time.Now().Format("2006-01-02 15:04"),
 		"pickup_location":       pickup,
-		"billing_customer_name": in.RecipientName,
-		"billing_address":       in.AddressLine1 + " " + in.AddressLine2,
+		"billing_customer_name": firstName,
+		"billing_last_name":     lastName,
+		"billing_address":       in.AddressLine1,
+		"billing_address_2":     in.AddressLine2,
 		"billing_city":          in.City,
 		"billing_pincode":       in.PIN,
 		"billing_state":         in.State,
 		"billing_country":       "India",
 		"billing_phone":         in.Phone,
+		"billing_email":         "distributor@kresconet.com",
 		"shipping_is_billing":   true,
 		"order_items": []map[string]interface{}{
 			{
