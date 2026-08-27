@@ -149,7 +149,7 @@ func Load() (*Config, error) {
 	v.SetDefault("SUREPASS_BASE_URL", "https://kyc-api.surepass.io/api/v1")
 	v.SetDefault("SUREPASS_CIBIL_BASE_URL", "https://app.surepass.app/production/api/v1")
 	v.SetDefault("SHIPROCKET_API_URL", "https://apiv2.shiprocket.in/v1")
-	v.SetDefault("SHIPROCKET_PICKUP_LOCATION", "Primary")
+	v.SetDefault("SHIPROCKET_PICKUP_LOCATION", "warehouse")
 
 	// Load .env file if present (non-fatal if missing)
 	v.SetConfigFile(".env")

@@ -60,7 +60,7 @@ func (h *ShippingHandler) CreateShipment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.PickupLocation == "" {
-		req.PickupLocation = "Primary"
+		req.PickupLocation = h.srSvc.PickupLocation()
 	}
 	if req.PaymentMethod != "Prepaid" && req.PaymentMethod != "COD" {
 		req.PaymentMethod = "Prepaid"
@@ -558,7 +558,7 @@ func (h *ShippingHandler) DispatchSampleOrder(w http.ResponseWriter, r *http.Req
 		Breadth:        10,
 		Height:         10,
 		PaymentMethod:  "Prepaid",
-		PickupLocation: "Primary",
+		PickupLocation: h.srSvc.PickupLocation(),
 	}
 
 	result, err := h.srSvc.DispatchSampleKit(r.Context(), in)
