@@ -12,13 +12,16 @@ import (
 
 // DistributorRecord is a row from the distributors table.
 type DistributorRecord struct {
-	ID        string    `json:"id"`
-	Mobile    string    `json:"mobile"`
-	Email     *string   `json:"email,omitempty"`
-	Name      *string   `json:"name,omitempty"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	Mobile             string    `json:"mobile"`
+	Email              *string   `json:"email,omitempty"`
+	Name               *string   `json:"name,omitempty"`
+	IsActive           bool      `json:"is_active"`
+	BusinessName       *string   `json:"business_name,omitempty"`
+	ApprovedLimitPaise int64     `json:"approved_limit_paise"`
+	AgreementStatus    *string   `json:"agreement_status,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // BusinessProfileRecord maps to business_profiles.
@@ -103,13 +106,21 @@ func (r *DistributorRepository) GetByID(ctx context.Context, id string) (*Distri
 	return scanDistributor(row)
 }
 
-// Create inserts a new distributor (from mobile verification) and returns the ID.
+// Create inserts a new distributor (from mobile verification) with is_active = FALSE and returns the ID.
 func (r *DistributorRepository) Create(ctx context.Context, mobile string) (string, error) {
 	var id string
 	err := r.db.QueryRow(ctx,
-		`INSERT INTO distributors (mobile) VALUES ($1) RETURNING id`, mobile,
+		`INSERT INTO distributors (mobile, is_active) VALUES ($1, FALSE) RETURNING id`, mobile,
 	).Scan(&id)
 	return id, err
+}
+
+// SetActiveStatus updates the is_active flag for a distributor.
+func (r *DistributorRepository) SetActiveStatus(ctx context.Context, id string, isActive bool) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE distributors SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		isActive, id)
+	return err
 }
 
 // UpdateBasic updates name and email on the distributor record.
@@ -428,19 +439,38 @@ func (r *DistributorRepository) ListAll(ctx context.Context, limit, offset int) 
 	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM distributors`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.db.Query(ctx,
-		`SELECT id, mobile, email, name, is_active, created_at, updated_at
-		 FROM distributors ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-		limit, offset)
+	query := `
+		SELECT d.id, d.mobile, d.email, d.name, d.is_active, d.created_at, d.updated_at,
+		       bp.business_name,
+		       COALESCE(cd.approved_limit_paise, 0) AS approved_limit_paise,
+		       da.status AS agreement_status
+		FROM distributors d
+		LEFT JOIN business_profiles bp ON bp.distributor_id = d.id
+		LEFT JOIN LATERAL (
+			SELECT approved_limit_paise
+			FROM credit_decisions
+			WHERE distributor_id = d.id AND eligibility = 'credit'
+			ORDER BY decided_at DESC LIMIT 1
+		) cd ON true
+		LEFT JOIN LATERAL (
+			SELECT status
+			FROM distributor_agreements
+			WHERE distributor_id = d.id
+			ORDER BY created_at DESC LIMIT 1
+		) da ON true
+		ORDER BY d.created_at DESC LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(ctx, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
+
 	var list []DistributorRecord
 	for rows.Next() {
 		d := DistributorRecord{}
 		if err := rows.Scan(&d.ID, &d.Mobile, &d.Email, &d.Name, &d.IsActive,
-			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.CreatedAt, &d.UpdatedAt, &d.BusinessName, &d.ApprovedLimitPaise, &d.AgreementStatus); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, d)

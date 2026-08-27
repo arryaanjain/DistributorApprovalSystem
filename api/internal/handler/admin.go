@@ -185,6 +185,10 @@ func (h *AdminHandler) ApproveApplication(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if targetStatus == "credit_active" || targetStatus == "approved" || targetStatus == "advance_only" {
+		_ = h.distRepo.SetActiveStatus(r.Context(), app.DistributorID, true)
+	}
+
 	response.JSON(w, map[string]interface{}{
 		"status":         targetStatus,
 		"application_id": app.ID,
@@ -219,6 +223,8 @@ func (h *AdminHandler) RejectApplication(w http.ResponseWriter, r *http.Request)
 		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+
+	_ = h.distRepo.SetActiveStatus(r.Context(), app.DistributorID, false)
 
 	response.JSON(w, map[string]interface{}{
 		"status":         "rejected",
@@ -310,6 +316,19 @@ func (h *AdminHandler) GetDistributor(w http.ResponseWriter, r *http.Request) {
 		"bank":        bank,
 		"application": app,
 		"offer":       offer,
+	})
+}
+
+func (h *AdminHandler) GetDistributorCreditTrail(w http.ResponseWriter, r *http.Request) {
+	distID := chi.URLParam(r, "id")
+	trail, err := h.creditRepo.GetCreditDecisionTrail(r.Context(), distID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	response.JSON(w, map[string]interface{}{
+		"distributor_id": distID,
+		"trail":          trail,
 	})
 }
 
