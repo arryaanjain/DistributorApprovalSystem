@@ -5,14 +5,12 @@ export function getAuthToken(): string | null {
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem('kresconet_admin_refresh_token');
+  return null;
 }
 
-export function setAuthToken(token: string, refreshToken?: string) {
+export function setAuthToken(token: string) {
   localStorage.setItem('kresconet_admin_token', token);
-  if (refreshToken) {
-    localStorage.setItem('kresconet_admin_refresh_token', refreshToken);
-  }
+  localStorage.removeItem('kresconet_admin_refresh_token');
 }
 
 export function clearAuthToken() {
@@ -20,22 +18,45 @@ export function clearAuthToken() {
   localStorage.removeItem('kresconet_admin_refresh_token');
 }
 
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (err: any) => void;
-}> = [];
+let refreshPromise: Promise<string> | null = null;
 
-const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else if (token) {
-      prom.resolve(token);
+export async function refreshAdminSession(): Promise<string> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/employee/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data.access_token || data.token)) {
+        const newAccess = data.access_token || data.token;
+        setAuthToken(newAccess);
+        if (data.user) {
+          localStorage.setItem('kresconet_admin_user', JSON.stringify(data.user));
+        }
+        return newAccess;
+      } else {
+        const msg = data?.error?.message || data?.message || 'Session expired. Please log in again.';
+        clearAuthToken();
+        localStorage.removeItem('kresconet_admin_user');
+        throw new Error(msg);
+      }
+    } catch (err) {
+      clearAuthToken();
+      localStorage.removeItem('kresconet_admin_user');
+      throw err;
+    } finally {
+      refreshPromise = null;
     }
-  });
-  failedQueue = [];
-};
+  })();
+
+  return refreshPromise;
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
@@ -55,62 +76,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh')) {
-    if (isRefreshing) {
-      return new Promise<string>((resolve, reject) => {
-        failedQueue.push({ resolve, reject });
-      }).then((newToken) => {
-        headers['Authorization'] = `Bearer ${newToken}`;
-        return fetch(`${API_BASE}${path}`, {
-          ...options,
-          credentials: 'include',
-          headers,
-        }).then(async (retryRes) => {
-          const body = await retryRes.json().catch(() => ({}));
-          if (!retryRes.ok) {
-            const errorMsg = body?.error?.message || body?.message || retryRes.statusText || 'API Request Failed';
-            throw new Error(errorMsg);
-          }
-          return body.data !== undefined ? body.data : body;
-        });
-      });
-    }
-
-    isRefreshing = true;
     try {
-      const storedRefreshToken = getRefreshToken();
-      const refreshRes = await fetch(`${API_BASE}/auth/employee/refresh`, {
-        method: 'POST',
+      const newAccess = await refreshAdminSession();
+      headers['Authorization'] = `Bearer ${newAccess}`;
+      res = await fetch(`${API_BASE}${path}`, {
+        ...options,
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: storedRefreshToken || '' }),
+        headers,
       });
-      const refreshData = await refreshRes.json();
-      isRefreshing = false;
-      if (refreshRes.ok && (refreshData.access_token || refreshData.token)) {
-        const newAccess = refreshData.access_token || refreshData.token;
-        const newRefresh = refreshData.refresh_token;
-        setAuthToken(newAccess, newRefresh);
-        processQueue(null, newAccess);
-        headers['Authorization'] = `Bearer ${newAccess}`;
-        res = await fetch(`${API_BASE}${path}`, {
-          ...options,
-          credentials: 'include',
-          headers,
-        });
-      } else {
-        const err = new Error('Session expired. Please log in again.');
-        processQueue(err, null);
-        clearAuthToken();
-        localStorage.removeItem('kresconet_admin_user');
-        window.location.href = '/';
-        throw err;
-      }
     } catch (err) {
-      isRefreshing = false;
-      processQueue(err, null);
-      clearAuthToken();
-      localStorage.removeItem('kresconet_admin_user');
-      window.location.href = '/';
       throw err;
     }
   }
@@ -142,7 +116,6 @@ export const api = {
   logout: () =>
     request('/auth/logout', {
       method: 'POST',
-      body: JSON.stringify({ refresh_token: getRefreshToken() || '' }),
     }),
 
   // Products & Sample Catalogue
@@ -204,6 +177,11 @@ export const api = {
   // Verification & Credit Auto-Trigger
   triggerVerifications: (appId: string, distId: string) =>
     request<any>(`/verification/${appId}/trigger?distributor_id=${distId}`, {
+      method: 'POST',
+    }),
+
+  fetchCibilReport: (appId: string, distId: string, force = false) =>
+    request<any>(`/verification/${appId}/cibil?distributor_id=${distId}${force ? '&force=true' : ''}`, {
       method: 'POST',
     }),
 
