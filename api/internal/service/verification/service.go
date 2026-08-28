@@ -5,7 +5,10 @@ package verification
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/pkg/apperrors"
 	"github.com/arryaanjain/DistributorApprovalSystem/internal/repository"
@@ -93,18 +96,66 @@ func (s *Service) TriggerAll(ctx context.Context, applicationID, distributorID s
 	}
 
 	// ── Credit Report ─────────────────────────────────────────────────────
+	// CIBIL report fetching is handled on-demand via manual admin trigger (TriggerCIBIL)
 	existingCredit, _ := s.verRepo.GetLatestCreditReport(ctx, distributorID)
-	if existingCredit == nil || existingCredit.BureauScore == nil {
-		if docs != nil && docs.PAN != nil {
-			if err := s.triggerCreditReport(ctx, distributorID, appID, docs.PAN, &dist.Mobile, expectedName); err != nil {
-				slog.Error("credit report fetch failed", "error", err, "distributor_id", distributorID)
-			}
-		}
+	if existingCredit != nil {
+		slog.Info("reusing existing CIBIL credit report record in TriggerAll", "distributor_id", distributorID)
 	} else {
-		slog.Info("reusing existing CIBIL credit report record", "distributor_id", distributorID, "bureau_score", *existingCredit.BureauScore)
+		slog.Info("skipping automatic CIBIL fetch in TriggerAll; pending manual admin trigger", "distributor_id", distributorID)
 	}
 
 	return nil
+}
+
+// TriggerCIBIL manually executes CIBIL report fetch for an application.
+// If force is false and an existing credit report record exists in DB, it reuses the existing report without touching the paid API.
+func (s *Service) TriggerCIBIL(ctx context.Context, applicationID, distributorID string, force bool) (*CreditReportResult, error) {
+	if !force {
+		existingCredit, err := s.verRepo.GetLatestCreditReport(ctx, distributorID)
+		if err == nil && existingCredit != nil && existingCredit.BureauScore != nil {
+			slog.Info("reusing existing cached CIBIL credit report record", "distributor_id", distributorID, "bureau_score", *existingCredit.BureauScore)
+			pdfURL := ""
+			if existingCredit.PDFURL != nil {
+				pdfURL = *existingCredit.PDFURL
+			}
+			provRef := ""
+			if existingCredit.ProviderRef != nil {
+				provRef = *existingCredit.ProviderRef
+			}
+			return &CreditReportResult{
+				BureauScore:      existingCredit.BureauScore,
+				HasDefaults:      existingCredit.HasDefaults != nil && *existingCredit.HasDefaults,
+				HasWriteoffs:     existingCredit.HasWriteoffs != nil && *existingCredit.HasWriteoffs,
+				HasSettlements:   existingCredit.HasSettlements != nil && *existingCredit.HasSettlements,
+				TotalActiveLoans: func() int64 { if existingCredit.TotalActiveLoans != nil { return *existingCredit.TotalActiveLoans }; return 0 }(),
+				DelinquencyCount: func() int { if existingCredit.DelinquencyCount != nil { return *existingCredit.DelinquencyCount }; return 0 }(),
+				FraudFlag:        existingCredit.FraudFlag,
+				ReportDate:       existingCredit.ReportDate,
+				PDFURL:           pdfURL,
+				ProviderRef:      provRef,
+			}, nil
+		}
+	}
+
+	docs, err := s.distRepo.GetBusinessDocuments(ctx, distributorID)
+	if err != nil {
+		return nil, apperrors.Internal("fetching business documents", err)
+	}
+	if docs == nil || docs.PAN == nil || strings.TrimSpace(*docs.PAN) == "" {
+		return nil, apperrors.Validation("cannot fetch CIBIL report: PAN document is missing")
+	}
+
+	dist, err := s.distRepo.GetByID(ctx, distributorID)
+	if err != nil || dist == nil {
+		return nil, apperrors.NotFound("distributor not found")
+	}
+
+	expectedName := ""
+	if dist.Name != nil {
+		expectedName = *dist.Name
+	}
+
+	return s.triggerCreditReport(ctx, distributorID, &applicationID, docs.PAN, &dist.Mobile, expectedName)
 }
 
 func (s *Service) triggerPAN(ctx context.Context, distributorID string, appID *string, pan, expectedName string) (*PANResult, error) {
@@ -189,40 +240,98 @@ func (s *Service) triggerBank(ctx context.Context, distributorID string, appID *
 		holder, bankName, result.NameMatch, raw, provRef)
 }
 
-func (s *Service) triggerCreditReport(ctx context.Context, distributorID string, appID, pan, mobile *string, name string) error {
-	recID, err := s.verRepo.CreateCreditReport(ctx, distributorID, appID, pan, mobile)
+func (s *Service) resolveApplicantName(ctx context.Context, distributorID, fallbackName string) string {
+	if strings.TrimSpace(fallbackName) != "" {
+		return strings.TrimSpace(fallbackName)
+	}
+
+	if panRec, err := s.verRepo.GetLatestPANVerification(ctx, distributorID); err == nil && panRec != nil && panRec.NameOnPAN != nil && strings.TrimSpace(*panRec.NameOnPAN) != "" {
+		return strings.TrimSpace(*panRec.NameOnPAN)
+	}
+
+	if gstRec, err := s.verRepo.GetLatestGSTVerification(ctx, distributorID); err == nil && gstRec != nil {
+		if gstRec.LegalName != nil && strings.TrimSpace(*gstRec.LegalName) != "" {
+			return strings.TrimSpace(*gstRec.LegalName)
+		}
+		if gstRec.TradeName != nil && strings.TrimSpace(*gstRec.TradeName) != "" {
+			return strings.TrimSpace(*gstRec.TradeName)
+		}
+	}
+
+	if bp, err := s.distRepo.GetBusinessProfile(ctx, distributorID); err == nil && bp != nil && strings.TrimSpace(bp.BusinessName) != "" {
+		return strings.TrimSpace(bp.BusinessName)
+	}
+
+	if dist, err := s.distRepo.GetByID(ctx, distributorID); err == nil && dist != nil && dist.Name != nil && strings.TrimSpace(*dist.Name) != "" {
+		return strings.TrimSpace(*dist.Name)
+	}
+
+	return ""
+}
+
+func (s *Service) triggerCreditReport(ctx context.Context, distributorID string, appID, pan, mobile *string, expectedName string) (*CreditReportResult, error) {
+	panStr := ""
+	if pan != nil {
+		panStr = strings.ToUpper(strings.TrimSpace(*pan))
+	}
+	mobileStr := ""
+	if mobile != nil {
+		mobileStr = strings.TrimSpace(*mobile)
+	}
+
+	// ── Pre-flight Input Validation ──────────────────────────────────────
+	panRegex := regexp.MustCompile(`^[A-Z]{5}[0-9]{4}[A-Z]{1}$`)
+	if !panRegex.MatchString(panStr) {
+		return nil, apperrors.Validation(fmt.Sprintf("invalid PAN number format '%s' (expected 10-char PAN e.g. ABCDE1234F)", panStr))
+	}
+
+	cleanMobile := regexp.MustCompile(`\D`).ReplaceAllString(mobileStr, "")
+	if len(cleanMobile) == 12 && strings.HasPrefix(cleanMobile, "91") {
+		cleanMobile = cleanMobile[2:]
+	}
+	mobileRegex := regexp.MustCompile(`^[6-9]\d{9}$`)
+	if !mobileRegex.MatchString(cleanMobile) {
+		return nil, apperrors.Validation(fmt.Sprintf("invalid mobile number format '%s' (expected 10-digit Indian phone number)", mobileStr))
+	}
+
+	resolvedName := s.resolveApplicantName(ctx, distributorID, expectedName)
+	if resolvedName == "" {
+		return nil, apperrors.Validation("cannot fetch CIBIL report: applicant name could not be resolved from PAN, GST, Business Profile, or account records")
+	}
+
+	recID, err := s.verRepo.CreateCreditReport(ctx, distributorID, appID, &panStr, &cleanMobile)
 	if err != nil {
 		slog.Warn("failed to create initial credit_reports DB record", "error", err, "distributor_id", distributorID)
 	}
 
-	panStr := ""
-	if pan != nil {
-		panStr = *pan
-	}
-	mobileStr := ""
-	if mobile != nil {
-		mobileStr = *mobile
+	// Make single-token CIBIL JSON fetch call (DO NOT call PDF endpoint automatically)
+	result, apiErr := s.client.FetchCreditReport(ctx, cleanMobile, panStr, resolvedName, "")
+
+	var raw []byte
+	var provRef *string
+	if result != nil {
+		raw = result.RawResponse
+		if result.ProviderRef != "" {
+			provRef = &result.ProviderRef
+		}
 	}
 
-	result, err := s.client.FetchCreditReport(ctx, mobileStr, panStr, name, "")
-	if err != nil {
-		slog.Error("credit report API call failed", "error", err, "distributor_id", distributorID)
-		return nil
+	if apiErr != nil {
+		slog.Error("CIBIL report API call failed", "error", apiErr, "distributor_id", distributorID)
+		if recID != "" && len(raw) > 0 {
+			_ = s.verRepo.UpdateCreditReport(ctx, recID, nil, nil, nil, nil, nil, nil, false, nil, nil, provRef, raw)
+		}
+		return result, apiErr
 	}
+
 	if result == nil {
-		return nil
+		return nil, apperrors.Internal("CIBIL API returned empty result", nil)
 	}
 
-	// Also fetch the PDF link
-	pdfURL := ""
-	if pdfLink, _, pdfErr := s.client.FetchCreditReportPDF(ctx, mobileStr, panStr, name, ""); pdfErr == nil {
-		pdfURL = pdfLink
-	}
-	result.PDFURL = pdfURL
-
-	raw := result.RawResponse
 	pdfPtr := &result.PDFURL
-	provRef := &result.ProviderRef
+	if result.PDFURL == "" {
+		pdfPtr = nil
+	}
 
 	if recID != "" {
 		if dbErr := s.verRepo.UpdateCreditReport(ctx, recID,
@@ -232,7 +341,8 @@ func (s *Service) triggerCreditReport(ctx context.Context, distributorID string,
 			slog.Error("failed to update credit_reports DB record", "error", dbErr, "distributor_id", distributorID)
 		}
 	}
-	return nil
+
+	return result, nil
 }
 
 // GetResults returns all latest verification results for a distributor.

@@ -470,16 +470,22 @@ func (c *SurepassClient) FetchCreditReport(ctx context.Context, mobile, pan, nam
 		Consent: "Y",
 	})
 	if err != nil {
-		return &CreditReportResult{RawResponse: raw}, nil
+		return &CreditReportResult{RawResponse: raw}, fmt.Errorf("cibil request error: %w", err)
 	}
 
 	var resp surepassCIBILResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return &CreditReportResult{RawResponse: raw}, nil
+		return &CreditReportResult{RawResponse: raw}, fmt.Errorf("cibil response unmarshal error: %w", err)
 	}
 
 	if !resp.Success {
-		return &CreditReportResult{RawResponse: raw}, nil
+		errMsg := "unknown error"
+		if resp.Message != nil && *resp.Message != "" {
+			errMsg = *resp.Message
+		} else if resp.MessageCode != "" {
+			errMsg = resp.MessageCode
+		}
+		return &CreditReportResult{RawResponse: raw}, fmt.Errorf("surepass cibil error: %s (status code %d)", errMsg, resp.StatusCode)
 	}
 
 	// Parse credit score from string
