@@ -84,7 +84,7 @@ func (s *Service) SendOTP(ctx context.Context, mobile, purpose string) (*SendOTP
 		result.DevOTP = otp
 	} else {
 		if s.msg91 != nil {
-			if err := s.msg91.SendOTP(ctx, mobile); err != nil {
+			if err := s.msg91.SendOTP(ctx, mobile, otp); err != nil {
 				slog.Error("failed to send OTP via MSG91", "error", err, "mobile", mobile)
 				return nil, apperrors.Internal("sending OTP via MSG91", err)
 			}
@@ -285,9 +285,50 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*Re
 	if rec == nil {
 		anyRec, _ := s.refreshTokenRepo.GetAny(ctx, refreshTokenStr)
 		if anyRec != nil && anyRec.Revoked {
-			slog.Warn("REVOKED REFRESH TOKEN REUSE DETECTED! Revoking all sessions for subject",
+			// Only trigger nuclear revocation if token was revoked MORE THAN 15 seconds ago.
+			// Recent revocations (< 15s) are typically race conditions from parallel frontend requests.
+			if time.Since(anyRec.UpdatedAt) > 15*time.Second {
+				slog.Warn("REVOKED REFRESH TOKEN REUSE DETECTED! Revoking all sessions for subject",
+					"subject_id", anyRec.SubjectID, "subject_type", anyRec.SubjectType)
+				_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
+				return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
+			}
+
+			slog.Info("Recently rotated refresh token re-submitted within 15s grace window",
 				"subject_id", anyRec.SubjectID, "subject_type", anyRec.SubjectType)
-			_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
+
+			// Grace window handling: issue a fresh access token for the subject without breaking session
+			var newAccessToken string
+			activeRefreshToken := refreshTokenStr
+
+			latestRec, err := s.refreshTokenRepo.GetLatestValidForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
+			if err == nil && latestRec != nil {
+				activeRefreshToken = latestRec.Token
+			}
+
+			if anyRec.SubjectType == "employee" {
+				user, err := s.userRepo.GetByID(ctx, anyRec.SubjectID)
+				if err == nil && user != nil && user.IsActive {
+					newAccessToken, err = s.issueEmployeeToken(user.ID, user.Email, user.Role, s.cfg.JWT.AccessExpiry)
+					if err == nil {
+						return &RefreshResult{
+							AccessToken:  newAccessToken,
+							RefreshToken: activeRefreshToken,
+						}, nil
+					}
+				}
+			} else if anyRec.SubjectType == "distributor" {
+				dist, err := s.distRepo.GetByID(ctx, anyRec.SubjectID)
+				if err == nil && dist != nil {
+					newAccessToken, err = s.issueDistributorToken(dist.ID, dist.Mobile)
+					if err == nil {
+						return &RefreshResult{
+							AccessToken:  newAccessToken,
+							RefreshToken: activeRefreshToken,
+						}, nil
+					}
+				}
+			}
 		}
 		return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
 	}
@@ -334,12 +375,35 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*Re
 	}, nil
 }
 
-// RefreshEmployeeToken is a wrapper for employee refresh calls.
+// RefreshEmployeeToken ensures only employee refresh tokens can be refreshed by admin endpoints.
 func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (*RefreshResult, error) {
+	if refreshToken == "" {
+		return nil, apperrors.Unauthorized("missing refresh token")
+	}
+	if s.refreshTokenRepo != nil {
+		rec, _ := s.refreshTokenRepo.GetValid(ctx, refreshToken)
+		if rec != nil && rec.SubjectType != "employee" {
+			return nil, apperrors.Unauthorized("invalid employee refresh token")
+		}
+	}
 	return s.RefreshToken(ctx, refreshToken)
 }
 
-// Logout revokes all sessions for the subject and/or the specific refresh token in the database.
+// RefreshDistributorToken ensures only distributor refresh tokens can be refreshed by distributor endpoints.
+func (s *Service) RefreshDistributorToken(ctx context.Context, refreshToken string) (*RefreshResult, error) {
+	if refreshToken == "" {
+		return nil, apperrors.Unauthorized("missing refresh token")
+	}
+	if s.refreshTokenRepo != nil {
+		rec, _ := s.refreshTokenRepo.GetValid(ctx, refreshToken)
+		if rec != nil && rec.SubjectType != "distributor" {
+			return nil, apperrors.Unauthorized("invalid distributor refresh token")
+		}
+	}
+	return s.RefreshToken(ctx, refreshToken)
+}
+
+// Logout revokes and deletes all sessions for the subject and/or the specific refresh token in the database.
 func (s *Service) Logout(ctx context.Context, refreshTokenStr, subjectID, subjectType string) error {
 	if s.refreshTokenRepo == nil {
 		return nil
@@ -348,7 +412,7 @@ func (s *Service) Logout(ctx context.Context, refreshTokenStr, subjectID, subjec
 		_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, subjectID, subjectType)
 	}
 	if refreshTokenStr != "" {
-		_ = s.refreshTokenRepo.Revoke(ctx, refreshTokenStr)
+		_ = s.refreshTokenRepo.DeleteByToken(ctx, refreshTokenStr)
 	}
 	return nil
 }

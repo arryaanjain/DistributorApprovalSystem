@@ -60,3 +60,31 @@ func (h *VerificationHandler) GetResults(w http.ResponseWriter, r *http.Request)
 
 	response.JSON(w, results)
 }
+
+// POST /api/v1/verification/{applicationId}/cibil
+func (h *VerificationHandler) TriggerCIBIL(w http.ResponseWriter, r *http.Request) {
+	applicationID := chi.URLParam(r, "applicationId")
+	if applicationID == "" {
+		response.BadRequest(w, "applicationId is required")
+		return
+	}
+
+	distributorID := r.URL.Query().Get("distributor_id")
+	if distributorID == "" {
+		response.BadRequest(w, "distributor_id query param required")
+		return
+	}
+
+	force := r.URL.Query().Get("force") == "true"
+
+	res, err := h.svc.TriggerCIBIL(r.Context(), applicationID, distributorID, force)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	response.JSON(w, map[string]interface{}{
+		"message": "CIBIL report process complete",
+		"result":  res,
+	})
+}

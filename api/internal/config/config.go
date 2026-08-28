@@ -127,9 +127,9 @@ func Load() (*Config, error) {
 
 	// Defaults
 	v.SetDefault("PORT", "8080")
-	v.SetDefault("READ_TIMEOUT", "15s")
-	v.SetDefault("WRITE_TIMEOUT", "15s")
-	v.SetDefault("IDLE_TIMEOUT", "60s")
+	v.SetDefault("READ_TIMEOUT", "60s")
+	v.SetDefault("WRITE_TIMEOUT", "60s")
+	v.SetDefault("IDLE_TIMEOUT", "120s")
 	v.SetDefault("DB_MAX_OPEN_CONNS", 25)
 	v.SetDefault("DB_MAX_IDLE_CONNS", 5)
 	v.SetDefault("MIGRATIONS_DIR", "./internal/database/migrations")

@@ -85,7 +85,7 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	if result.RefreshToken != "" {
 		http.SetCookie(w, &http.Cookie{
-			Name:     "refresh_token",
+			Name:     "kresconet_distributor_refresh_token",
 			Value:    result.RefreshToken,
 			Path:     "/",
 			HttpOnly: true,
@@ -128,7 +128,7 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 
 	if result.RefreshToken != "" {
 		http.SetCookie(w, &http.Cookie{
-			Name:     "refresh_token",
+			Name:     "kresconet_admin_refresh_token",
 			Value:    result.RefreshToken,
 			Path:     "/",
 			HttpOnly: true,
@@ -150,18 +150,22 @@ type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+// RefreshToken handles distributor refresh requests using kresconet_distributor_refresh_token.
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	refreshTokenStr := ""
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-		refreshTokenStr = req.RefreshToken
+
+	// 1. Check HttpOnly cookie specifically for distributor first
+	if cookie, err := r.Cookie("kresconet_distributor_refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
+	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
 	}
 
-	if refreshTokenStr == "" {
-		for _, c := range r.Cookies() {
-			if c.Name == "refresh_token" && c.Value != "" {
-				refreshTokenStr = c.Value
-			}
+	// 2. Fallback to JSON request body
+	if refreshTokenStr == "" && r.Body != nil {
+		var req refreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+			refreshTokenStr = req.RefreshToken
 		}
 	}
 
@@ -170,26 +174,15 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.svc.RefreshToken(r.Context(), refreshTokenStr)
+	result, err := h.svc.RefreshDistributorToken(r.Context(), refreshTokenStr)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
-	// Purge legacy path cookie from browser
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/api/v1/auth",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
-
 	if result.RefreshToken != "" {
 		http.SetCookie(w, &http.Cookie{
-			Name:     "refresh_token",
+			Name:     "kresconet_distributor_refresh_token",
 			Value:    result.RefreshToken,
 			Path:     "/",
 			HttpOnly: true,
@@ -205,24 +198,71 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// EmployeeRefresh handles employee/admin refresh requests using kresconet_admin_refresh_token.
 func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
-	h.RefreshToken(w, r)
+	refreshTokenStr := ""
+
+	// 1. Check HttpOnly cookie specifically for admin/employee first
+	if cookie, err := r.Cookie("kresconet_admin_refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
+	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshTokenStr = cookie.Value
+	}
+
+	// 2. Fallback to JSON request body
+	if refreshTokenStr == "" && r.Body != nil {
+		var req refreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+			refreshTokenStr = req.RefreshToken
+		}
+	}
+
+	if refreshTokenStr == "" {
+		response.Unauthorized(w, "missing admin refresh token")
+		return
+	}
+
+	result, err := h.svc.RefreshEmployeeToken(r.Context(), refreshTokenStr)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+
+	if result.RefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "kresconet_admin_refresh_token",
+			Value:    result.RefreshToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   30 * 86400,
+		})
+	}
+
+	response.JSON(w, map[string]interface{}{
+		"access_token":  result.AccessToken,
+		"token":         result.AccessToken,
+		"refresh_token": result.RefreshToken,
+	})
 }
 
 // ─── POST /api/v1/auth/logout ─────────────────────────────────────────────────
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshTokenStr := ""
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-		refreshTokenStr = req.RefreshToken
+
+	// Check all cookie variants
+	for _, c := range r.Cookies() {
+		if (c.Name == "kresconet_admin_refresh_token" || c.Name == "kresconet_distributor_refresh_token" || c.Name == "refresh_token") && c.Value != "" {
+			refreshTokenStr = c.Value
+			break
+		}
 	}
 
-	if refreshTokenStr == "" {
-		for _, c := range r.Cookies() {
-			if c.Name == "refresh_token" && c.Value != "" {
-				refreshTokenStr = c.Value
-			}
+	if refreshTokenStr == "" && r.Body != nil {
+		var req refreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+			refreshTokenStr = req.RefreshToken
 		}
 	}
 
@@ -238,25 +278,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.svc.Logout(r.Context(), refreshTokenStr, subjectID, subjectType)
 
-	// Purge both / and /api/v1/auth path cookies
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/api/v1/auth",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
+	// Purge all cookies
+	cookieNames := []string{"kresconet_admin_refresh_token", "kresconet_distributor_refresh_token", "refresh_token"}
+	for _, name := range cookieNames {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+			Expires:  time.Unix(0, 0),
+		})
+	}
 
 	response.JSON(w, map[string]string{"message": "logged out successfully"})
 }

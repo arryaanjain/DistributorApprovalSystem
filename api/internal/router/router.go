@@ -96,6 +96,7 @@ func New(deps *Dependencies) http.Handler {
 		r.Route("/verification", func(r chi.Router) {
 			r.Use(middleware.RequireEmployee(&deps.Cfg.JWT))
 			r.Post("/{applicationId}/trigger", h.Verification.TriggerAll)
+			r.Post("/{applicationId}/cibil",   h.Verification.TriggerCIBIL)
 			r.Get("/{applicationId}/results",  h.Verification.GetResults)
 		})
 
