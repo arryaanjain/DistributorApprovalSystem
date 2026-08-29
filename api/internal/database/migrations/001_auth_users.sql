@@ -11,22 +11,28 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ENUMS
 -- ============================================================
 
-CREATE TYPE user_role AS ENUM (
-    'super_admin',
-    'credit_manager',
-    'accounts',
-    'sales',
-    'back_office',
-    'dispatch',
-    'viewer'
-);
-
-CREATE TYPE app_env AS ENUM ('development', 'staging', 'production');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+        CREATE TYPE user_role AS ENUM (
+            'super_admin',
+            'credit_manager',
+            'accounts',
+            'sales',
+            'back_office',
+            'dispatch',
+            'viewer'
+        );
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_env') THEN
+        CREATE TYPE app_env AS ENUM ('development', 'staging', 'production');
+    END IF;
+END $$;
 
 -- ============================================================
 -- USERS (internal employees)
 -- ============================================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name          TEXT NOT NULL,
     email         TEXT NOT NULL UNIQUE,
@@ -38,12 +44,12 @@ CREATE TABLE users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- ============================================================
 -- OTP VERIFICATIONS (distributor mobile auth)
 -- ============================================================
-CREATE TABLE otp_verifications (
+CREATE TABLE IF NOT EXISTS otp_verifications (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     mobile       TEXT NOT NULL,
     otp_hash     TEXT NOT NULL,       -- bcrypt hash of the OTP
@@ -54,12 +60,12 @@ CREATE TABLE otp_verifications (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_otp_mobile_purpose ON otp_verifications(mobile, purpose);
+CREATE INDEX IF NOT EXISTS idx_otp_mobile_purpose ON otp_verifications(mobile, purpose);
 
 -- ============================================================
 -- CONSENTS
 -- ============================================================
-CREATE TABLE consents (
+CREATE TABLE IF NOT EXISTS consents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     distributor_id  UUID,             -- may be null before distributor record is created
     mobile          TEXT NOT NULL,
