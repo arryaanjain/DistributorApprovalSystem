@@ -11,7 +11,7 @@ import {
   Step3Data,
   Step5Data,
   Step6Data,
-  Step7Data,
+  Step7Data,  
   AppStatus,
 } from "@/types/onboarding";
 
@@ -171,6 +171,50 @@ export default function DistributorPortal() {
     }
 
     fetchCatalogues();
+  };
+
+  const getMaxAllowedStepIndex = (): number => {
+    if (!token) return 0;
+    if (!appStatus) return 1;
+    const st = appStatus.status;
+
+    if (
+      st === "consent_given" ||
+      st === "bank_submitted" ||
+      st === "under_review" ||
+      st === "offer_generated" ||
+      st === "offer_accepted" ||
+      st === "agreement_pending" ||
+      st === "agreement_signed" ||
+      st === "approved" ||
+      st === "credit_active" ||
+      st === "advance_only"
+    ) {
+      return 9;
+    }
+    if (st === "statutory_submitted") {
+      return 6;
+    }
+    if (st === "preference_submitted") {
+      return 5;
+    }
+    if (st === "business_submitted") {
+      return 3;
+    }
+    if (st === "basic_submitted") {
+      return 2;
+    }
+    if (st === "trial" || trialActivated) {
+      return 9;
+    }
+    return 1;
+  };
+
+  const maxAllowedStepIndex = getMaxAllowedStepIndex();
+
+  const handleContinueFullOnboarding = () => {
+    // Return distributor from trial dashboard to statutory / KYC form (Step 5)
+    setStep("step5_kyc_gst");
   };
 
   const fetchCatalogues = async () => {
@@ -540,11 +584,10 @@ export default function DistributorPortal() {
 
       const isPanOK = res.data?.pan_verified === true;
       const isGstOK = !step5.has_gst || res.data?.gst_verified === true;
-      const hasWarnings = warnings.length > 0;
 
-      // Gate Guard: Stop user on Step 5 if verification fails or warnings/mismatches exist
-      if (!isPanOK || !isGstOK || hasWarnings) {
-        setErrorMsg("KYC / GST verification failed or discrepancies detected. Please resolve errors before proceeding.");
+      // Gate Guard: Stop user on Step 5 if PAN/GST verification failed completely
+      if (!isPanOK || !isGstOK) {
+        setErrorMsg("KYC / GST verification failed. Please verify your PAN/GST numbers.");
         return;
       }
 
@@ -610,7 +653,11 @@ export default function DistributorPortal() {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
         {step !== "auth" && step !== "step9_dashboard" && (
-          <OnboardingStepNav step={step} onStepClick={(targetStep) => setStep(targetStep)} />
+          <OnboardingStepNav
+            step={step}
+            maxAllowedStepIndex={maxAllowedStepIndex}
+            onStepClick={(targetStep) => setStep(targetStep)}
+          />
         )}
 
         {/* Global Error Banner */}
@@ -753,6 +800,7 @@ export default function DistributorPortal() {
             regularProducts={regularProducts}
             appStatus={appStatus}
             onSignOut={handleSignOut}
+            onContinueFullOnboarding={handleContinueFullOnboarding}
           />
         )}
       </main>

@@ -1,13 +1,18 @@
 import React from "react";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Lock } from "lucide-react";
 import { OnboardingStep, STEP_LABELS } from "@/types/onboarding";
 
 interface OnboardingStepNavProps {
   step: OnboardingStep;
+  maxAllowedStepIndex?: number;
   onStepClick?: (step: OnboardingStep) => void;
 }
 
-export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onStepClick }) => {
+export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({
+  step,
+  maxAllowedStepIndex = 9,
+  onStepClick,
+}) => {
   const stepKeys: OnboardingStep[] = [
     "step1_business_det",
     "step2_business_exp",
@@ -29,7 +34,7 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
   const progressPercent = Math.round((currentProgressIdx / 9) * 100);
 
   const handleStepClick = (num: number) => {
-    if (onStepClick && num <= stepKeys.length) {
+    if (onStepClick && num <= maxAllowedStepIndex) {
       onStepClick(stepKeys[num - 1]);
     }
   };
@@ -57,24 +62,29 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
             const isDone = num < currentProgressIdx;
             const isCurrent = num === currentProgressIdx;
+            const isLocked = num > maxAllowedStepIndex;
             const stepTitle = Object.values(STEP_LABELS).find((s) => s.num === num)?.title;
 
             return (
               <button
                 key={num}
                 onClick={() => handleStepClick(num)}
-                disabled={!onStepClick}
+                disabled={!onStepClick || isLocked}
                 type="button"
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all touch-manipulation min-h-[34px] ${
                   isDone
                     ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                     : isCurrent
                     ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                    : "bg-slate-800/60 text-slate-500 border border-slate-700/50"
+                    : isLocked
+                    ? "bg-slate-900/60 text-slate-600 border border-slate-800/80 cursor-not-allowed opacity-60"
+                    : "bg-slate-800/60 text-slate-400 border border-slate-700/50 hover:bg-slate-800 hover:text-white"
                 }`}
               >
                 {isDone ? (
                   <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                ) : isLocked ? (
+                  <Lock className="w-3 h-3 text-slate-600 shrink-0" />
                 ) : (
                   <span className="font-mono text-[10px]">{num}.</span>
                 )}
@@ -90,19 +100,22 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
           const isDone = num < currentProgressIdx;
           const isCurrent = num === currentProgressIdx;
-          const isClickable = Boolean(onStepClick);
+          const isLocked = num > maxAllowedStepIndex;
+          const isClickable = Boolean(onStepClick) && !isLocked;
 
           return (
             <div
               key={num}
               onClick={() => handleStepClick(num)}
               title={
-                isClickable
+                isLocked
+                  ? `Complete Step ${maxAllowedStepIndex} first to unlock`
+                  : isClickable
                   ? `Jump to ${Object.values(STEP_LABELS).find((s) => s.num === num)?.title}`
                   : undefined
               }
               className={`flex items-center gap-2 min-w-max ${
-                isClickable ? "cursor-pointer group select-none" : ""
+                isClickable ? "cursor-pointer group select-none" : isLocked ? "cursor-not-allowed opacity-60" : ""
               }`}
             >
               <div
@@ -111,10 +124,18 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
                     ? "bg-emerald-500 text-slate-950 font-extrabold group-hover:bg-emerald-400 group-hover:scale-105"
                     : isCurrent
                     ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/40 ring-4 ring-indigo-500/20 group-hover:bg-indigo-500"
-                    : "bg-slate-800 text-slate-500 group-hover:bg-slate-700 group-hover:text-slate-300"
+                    : isLocked
+                    ? "bg-slate-900 text-slate-600 border border-slate-800"
+                    : "bg-slate-800 text-slate-400 group-hover:bg-slate-700 group-hover:text-slate-200"
                 }`}
               >
-                {isDone ? <Check className="w-4 h-4" /> : num}
+                {isDone ? (
+                  <Check className="w-4 h-4" />
+                ) : isLocked ? (
+                  <Lock className="w-3.5 h-3.5 text-slate-600" />
+                ) : (
+                  num
+                )}
               </div>
               <span
                 className={`text-xs font-medium transition-colors ${
@@ -122,7 +143,9 @@ export const OnboardingStepNav: React.FC<OnboardingStepNavProps> = ({ step, onSt
                     ? "text-indigo-400 font-semibold"
                     : isDone
                     ? "text-slate-300 group-hover:text-white font-medium"
-                    : "text-slate-600 group-hover:text-slate-400"
+                    : isLocked
+                    ? "text-slate-600"
+                    : "text-slate-500 group-hover:text-slate-300"
                 }`}
               >
                 {Object.values(STEP_LABELS).find((s) => s.num === num)?.title}

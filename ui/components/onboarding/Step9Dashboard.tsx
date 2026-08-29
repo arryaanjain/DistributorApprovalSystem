@@ -15,6 +15,7 @@ interface Step9DashboardProps {
   regularProducts: ProductItem[];
   appStatus?: AppStatus | null;
   onSignOut?: () => void;
+  onContinueFullOnboarding?: () => void;
 }
 
 export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
@@ -22,6 +23,7 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
   regularProducts,
   appStatus,
   onSignOut,
+  onContinueFullOnboarding,
 }) => {
   const [activeTab, setActiveTab] = useState<DashboardTabType>("tracking");
   const [catalogOrders, setCatalogOrders] = useState<any[]>([]);
@@ -90,7 +92,11 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
       {activeTab === "catalogue" && <ProductCatalogueTab regularProducts={regularProducts} />}
 
       {activeTab === "credit" && (
-        <CreditFacilityTab trialActivated={trialActivated} appStatus={appStatus} />
+        <CreditFacilityTab
+          trialActivated={trialActivated}
+          appStatus={appStatus}
+          onContinueFullOnboarding={onContinueFullOnboarding}
+        />
       )}
 
       {activeTab === "address" && <AddressDirectoryTab />}

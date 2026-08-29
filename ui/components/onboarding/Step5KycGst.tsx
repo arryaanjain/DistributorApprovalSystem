@@ -92,8 +92,15 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
   const panHolderName = verificationResults?.panHolderName;
   const gstLegalName = verificationResults?.gstLegalName;
 
+  const hasFetchedResults = Boolean(panHolderName || gstLegalName);
   const isPanNameMatched = checkNamesMatch(step1Name, panHolderName);
   const isGstNameMatched = checkNamesMatch(step1BusinessName, gstLegalName) || checkNamesMatch(step1Name, gstLegalName);
+
+  const hasNameMismatch = hasFetchedResults && (
+    (panHolderName && !isPanNameMatched) || 
+    (gstLegalName && step5.has_gst && !isGstNameMatched)
+  );
+  const hasWarnings = Boolean(verificationWarnings && verificationWarnings.length > 0);
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-xl max-w-3xl mx-auto space-y-6">
@@ -194,7 +201,7 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
       )}
 
       {/* Mismatch Warning Alert Box & Go To Step 1 Action */}
-      {((verificationWarnings && verificationWarnings.length > 0) || (onGoToStep1 && (!isPanNameMatched || !isGstNameMatched))) && (
+      {(hasWarnings || hasNameMismatch) && (
         <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -207,7 +214,7 @@ export const Step5KycGst: React.FC<Step5KycGstProps> = ({
               ))}
             </ul>
           )}
-          {onGoToStep1 && (!isPanNameMatched || !isGstNameMatched) && (
+          {onGoToStep1 && hasNameMismatch && (
             <div className="pt-1">
               <button
                 type="button"
