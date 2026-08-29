@@ -22,7 +22,7 @@ export const Login: React.FC = () => {
       const data = await api.loginWithCredentials(email, password);
       const token = data.access_token || data.token;
       if (token) {
-        login(token, data.user || { id: 'EMP-ADMIN', name: 'Kresconet Admin', role: 'super_admin' }, data.refresh_token);
+        login(token, data.user || { id: 'EMP-ADMIN', name: 'Kresconet Admin', role: 'super_admin' });
       } else {
         setError('Authentication failed. No access token received.');
       }

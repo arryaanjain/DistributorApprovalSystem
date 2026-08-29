@@ -118,7 +118,7 @@ export const Applications: React.FC = () => {
     }
   };
 
-  const handleFetchCibilReport = async () => {
+  const handleFetchCibilReport = async (force = false) => {
     const appId =
       appDetail?.application?.id ||
       appDetail?.application?.ID ||
@@ -139,10 +139,10 @@ export const Applications: React.FC = () => {
       return;
     }
     setActionLoading(true);
-    setActionMessage('Fetching CIBIL Credit Bureau Report via Surepass...');
+    setActionMessage(force ? 'Force re-fetching CIBIL Credit Bureau Report via Surepass...' : 'Retrieving CIBIL Credit Bureau Report...');
     try {
-      await api.triggerVerifications(appId, distId);
-      setActionMessage('CIBIL Credit Bureau Report fetched successfully!');
+      await api.fetchCibilReport(appId, distId, force);
+      setActionMessage('CIBIL Credit Bureau Report retrieved successfully!');
       await loadDetail(appId);
     } catch (err: any) {
       console.error('CIBIL fetch failed:', err);
@@ -199,11 +199,11 @@ export const Applications: React.FC = () => {
       return;
     }
     setActionLoading(true);
-    setActionMessage('Fetching CIBIL Report & Calculating Credit Score...');
+    setActionMessage('Verifying CIBIL Report & Calculating Credit Score...');
     try {
-      await api.triggerVerifications(appId, distId);
+      await api.fetchCibilReport(appId, distId);
       await api.evaluateCredit(appId);
-      setActionMessage('CIBIL Report fetched & Credit Score calculated successfully!');
+      setActionMessage('CIBIL Report & Credit Score process completed successfully!');
       await loadDetail(appId);
     } catch (err: any) {
       console.error('Process failed:', err);
@@ -505,11 +505,12 @@ export const Applications: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={handleFetchCibilReport}
+                              onClick={() => handleFetchCibilReport(true)}
                               disabled={actionLoading}
                               className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-all"
+                              title="Force re-fetch from Surepass API (consumes API token)"
                             >
-                              Refresh CIBIL
+                              Force Refresh CIBIL
                             </button>
                             <a
                               href={pdfUrl}
@@ -528,7 +529,7 @@ export const Applications: React.FC = () => {
                             <span className="text-slate-300 font-semibold">CIBIL Report:</span> <span className="text-amber-400 font-mono">Not Fetched Yet</span>
                           </div>
                           <button
-                            onClick={handleFetchCibilReport}
+                            onClick={() => handleFetchCibilReport()}
                             disabled={actionLoading}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all"
                           >
