@@ -21,6 +21,6 @@ COPY --from=builder /app/server /app/server
 COPY --from=builder /app/internal/database/migrations /app/internal/database/migrations
 COPY --from=builder /app/.env /app/.env
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["/app/server"]

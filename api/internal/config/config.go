@@ -126,7 +126,7 @@ func Load() (*Config, error) {
 	v := viper.New()
 
 	// Defaults
-	v.SetDefault("PORT", "8080")
+	v.SetDefault("PORT", "8081")
 	v.SetDefault("READ_TIMEOUT", "60s")
 	v.SetDefault("WRITE_TIMEOUT", "60s")
 	v.SetDefault("IDLE_TIMEOUT", "120s")
