@@ -1,0 +1,50 @@
+name: Deploy Go API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - '.github/workflows/deploy-api.yml'
+      - 'ecosystem.config.js'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: api/go.sum
+
+      - name: Cross-Compile Binary for Linux
+        run: |
+          cd api
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o distributor-api ./cmd/server
+
+      - name: Transfer Binary to Server
+        uses: easingthemes/ssh-deploy@v5.0.3
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          ARGS: "-rlgoDzP"
+          SOURCE: "api/distributor-api"
+          REMOTE_HOST: ${{ secrets.SERVER_HOST }}
+          REMOTE_USER: ${{ secrets.SERVER_USER }}
+          TARGET: "/var/www/krescoindia.com/production/DistributorApprovalSystem/api/"
+
+      - name: Restart Go API Service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /var/www/krescoindia.com/production/DistributorApprovalSystem
+            chmod +x api/distributor-api
+            pm2 reload distributor-api || pm2 startOrReload ecosystem.config.js --only distributor-api

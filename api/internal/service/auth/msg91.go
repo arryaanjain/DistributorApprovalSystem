@@ -75,6 +75,7 @@ func (c *msg91Client) SendOTP(ctx context.Context, mobile string, otp string) er
 	if otp != "" {
 		q.Set("otp", otp)
 	}
+	// Only set sender if explicitly provided and non-empty
 	if c.senderID != "" {
 		q.Set("sender", c.senderID)
 	}

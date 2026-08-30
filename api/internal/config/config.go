@@ -252,6 +252,14 @@ func (c *Config) validate() error {
 	if c.Admin.Password == "" {
 		return fmt.Errorf("ADMIN_PASSWORD is required in environment configuration")
 	}
+	if !c.OTP.DevMode {
+		if c.MSG91.AuthKey == "" {
+			return fmt.Errorf("MSG91_AUTH_KEY is required when OTP_DEV_MODE is false")
+		}
+		if c.MSG91.TemplateID == "" {
+			return fmt.Errorf("MSG91_TEMPLATE_ID is required when OTP_DEV_MODE is false")
+		}
+	}
 	return nil
 }
 

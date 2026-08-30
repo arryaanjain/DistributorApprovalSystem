@@ -1,0 +1,30 @@
+name: Deploy Next.js Distributor UI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ui/**'
+      - '.github/workflows/deploy-ui.yml'
+      - 'ecosystem.config.js'
+  workflow_dispatch:
+
+jobs:
+  deploy-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH & Deploy Next.js App
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /var/www/krescoindia.com/production/DistributorApprovalSystem
+            git pull origin main
+            cd ui
+            npm ci
+            npm run build
+            cd ..
+            pm2 reload distributor-ui || pm2 startOrReload ecosystem.config.js --only distributor-ui

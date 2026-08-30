@@ -6,7 +6,7 @@ dev:
 
 # Build binary
 build:
-	go build -o ./tmp/main ./cmd/server
+	go build -o ./tmp/distributor-api ./cmd/server
 
 # Run tests
 test:
