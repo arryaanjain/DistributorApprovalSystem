@@ -123,18 +123,10 @@ func (s *Service) VerifyOTP(ctx context.Context, mobile, otp, purpose string) (*
 		return nil, apperrors.RateLimited()
 	}
 
-	// Validate OTP
-	if !s.cfg.OTP.DevMode && s.msg91 != nil {
-		ok, err := s.msg91.VerifyOTP(ctx, mobile, otp)
-		if err != nil || !ok {
-			_ = s.otpRepo.IncrementAttempts(ctx, record.ID)
-			return nil, apperrors.Unauthorized("invalid or expired OTP")
-		}
-	} else {
-		if err := crypto.CheckPassword(otp, record.OTPHash); err != nil {
-			_ = s.otpRepo.IncrementAttempts(ctx, record.ID)
-			return nil, apperrors.Unauthorized("invalid OTP")
-		}
+	// Validate OTP against stored hash
+	if err := crypto.CheckPassword(otp, record.OTPHash); err != nil {
+		_ = s.otpRepo.IncrementAttempts(ctx, record.ID)
+		return nil, apperrors.Unauthorized("invalid OTP")
 	}
 
 	// Mark as verified

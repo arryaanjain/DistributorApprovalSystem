@@ -130,47 +130,50 @@ export default function DistributorPortal() {
 
   const loadApplicationStatus = async () => {
     setLoading(true);
-    const res = await fetchApi<AppStatus>("/onboarding/status");
-    setLoading(false);
-    if (res.success && res.data) {
-      setAppStatus(res.data);
-      const st = res.data.status;
-      if (st === "trial") {
-        setTrialActivated(true);
-        setStep("step8_approval");
-      } else if (
-        st === "consent_given" ||
-        st === "under_review" ||
-        st === "offer_generated" ||
-        st === "offer_accepted" ||
-        st === "agreement_pending" ||
-        st === "agreement_signed" ||
-        st === "approved" ||
-        st === "credit_active" ||
-        st === "advance_only" ||
-        st === "bank_submitted"
-      ) {
-        setStep("step8_approval");
-      } else if (st === "statutory_submitted") {
-        setStep("step6_auth");
-      } else if (st === "preference_submitted") {
-        setStep("step5_kyc_gst");
-      } else if (st === "business_submitted") {
-        setStep("step3_credit_pref");
-      } else if (st === "basic_submitted") {
-        setStep("step2_business_exp");
+    try {
+      const res = await fetchApi<AppStatus>("/onboarding/status");
+      if (res.success && res.data) {
+        setAppStatus(res.data);
+        const st = res.data.status;
+        if (st === "trial") {
+          setTrialActivated(true);
+          setStep("step8_approval");
+        } else if (
+          st === "consent_given" ||
+          st === "under_review" ||
+          st === "offer_generated" ||
+          st === "offer_accepted" ||
+          st === "agreement_pending" ||
+          st === "agreement_signed" ||
+          st === "approved" ||
+          st === "credit_active" ||
+          st === "advance_only" ||
+          st === "bank_submitted"
+        ) {
+          setStep("step8_approval");
+        } else if (st === "statutory_submitted") {
+          setStep("step6_auth");
+        } else if (st === "preference_submitted") {
+          setStep("step5_kyc_gst");
+        } else if (st === "business_submitted") {
+          setStep("step3_credit_pref");
+        } else if (st === "basic_submitted") {
+          setStep("step2_business_exp");
+        } else {
+          setStep("step1_business_det");
+        }
       } else {
-        setStep("step1_business_det");
+        if (res.error?.code === "UNAUTHORIZED" || !localStorage.getItem("kresconet_token")) {
+          setStep("auth");
+        } else {
+          setStep("step1_business_det");
+        }
       }
-    } else {
-      if (res.error?.code === "UNAUTHORIZED" || !localStorage.getItem("kresconet_token")) {
-        setStep("auth");
-      } else {
-        setStep("step1_business_det");
-      }
-    }
 
-    fetchCatalogues();
+      fetchCatalogues();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getMaxAllowedStepIndex = (): number => {
@@ -235,21 +238,26 @@ export default function DistributorPortal() {
     setSuccessMsg(null);
     setLoading(true);
 
-    const res = await fetchApi<{ dev_otp?: string }>("/auth/otp/send", {
-      method: "POST",
-      body: JSON.stringify({ mobile, purpose: "onboarding" }),
-    });
+    try {
+      const cleanMobile = mobile.trim().replace(/[^\d+]/g, "");
+      const res = await fetchApi<{ dev_otp?: string }>("/auth/otp/send", {
+        method: "POST",
+        body: JSON.stringify({ mobile: cleanMobile, purpose: "onboarding" }),
+      });
 
-    setLoading(false);
-    if (res.success) {
-      setOtpSent(true);
-      setSuccessMsg("OTP sent successfully to your mobile number.");
-      if (res.data?.dev_otp) {
-        setDevOtp(res.data.dev_otp);
-        setOtp(res.data.dev_otp);
+      if (res.success) {
+        setOtpSent(true);
+        setSuccessMsg("OTP sent successfully to your mobile number.");
+        if (res.data?.dev_otp) {
+          setDevOtp(res.data.dev_otp);
+          setOtp(res.data.dev_otp);
+        }
+      } else {
+        const detailsStr = res.error?.details ? ` (${JSON.stringify(res.error.details)})` : "";
+        setErrorMsg((res.error?.message || "Failed to send OTP") + detailsStr);
       }
-    } else {
-      setErrorMsg(res.error?.message || "Failed to send OTP");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -259,25 +267,30 @@ export default function DistributorPortal() {
     setSuccessMsg(null);
     setLoading(true);
 
-    const res = await fetchApi<{ token: string; refresh_token?: string; distributor_id: string }>("/auth/otp/verify", {
-      method: "POST",
-      body: JSON.stringify({ mobile, otp, purpose: "onboarding" }),
-    });
+    try {
+      const cleanMobile = mobile.trim().replace(/[^\d+]/g, "");
+      const res = await fetchApi<{ token: string; refresh_token?: string; distributor_id: string }>("/auth/otp/verify", {
+        method: "POST",
+        body: JSON.stringify({ mobile: cleanMobile, otp: otp.trim(), purpose: "onboarding" }),
+      });
 
-    setLoading(false);
-    if (res.success && res.data) {
-      const { token, refresh_token, distributor_id } = res.data;
-      localStorage.setItem("kresconet_token", token);
-      if (refresh_token) {
-        localStorage.setItem("kresconet_refresh_token", refresh_token);
+      if (res.success && res.data) {
+        const { token, refresh_token, distributor_id } = res.data;
+        localStorage.setItem("kresconet_token", token);
+        if (refresh_token) {
+          localStorage.setItem("kresconet_refresh_token", refresh_token);
+        }
+        localStorage.setItem("kresconet_dist_id", distributor_id);
+        setToken(token);
+        setDistributorId(distributor_id);
+        setSuccessMsg("Mobile Verified Successfully!");
+        loadApplicationStatus();
+      } else {
+        const detailsStr = res.error?.details ? ` (${JSON.stringify(res.error.details)})` : "";
+        setErrorMsg((res.error?.message || "Invalid or expired OTP") + detailsStr);
       }
-      localStorage.setItem("kresconet_dist_id", distributor_id);
-      setToken(token);
-      setDistributorId(distributor_id);
-      setSuccessMsg("Mobile Verified Successfully!");
-      loadApplicationStatus();
-    } else {
-      setErrorMsg(res.error?.message || "Invalid or expired OTP");
+    } finally {
+      setLoading(false);
     }
   };
 
