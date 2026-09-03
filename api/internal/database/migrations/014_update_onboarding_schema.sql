@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS products (
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
     is_sample     BOOLEAN NOT NULL DEFAULT FALSE,
     is_regular    BOOLEAN NOT NULL DEFAULT TRUE,
+    image_url     TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS products (
 ALTER TABLE products
     ADD COLUMN IF NOT EXISTS moq INT NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS is_regular BOOLEAN NOT NULL DEFAULT TRUE;
+    ADD COLUMN IF NOT EXISTS is_regular BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS image_url TEXT;
 
 -- 4. Ensure order_items table has missing columns used by repository
 ALTER TABLE order_items
