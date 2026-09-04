@@ -93,7 +93,7 @@ export const SamplePaymentModal: React.FC<SamplePaymentModalProps> = ({
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
               <Truck className="w-4 h-4 text-amber-400" />
-              <span>Sample Delivery Address</span>
+              <span>Delivery Address</span>
             </div>
 
             <div>

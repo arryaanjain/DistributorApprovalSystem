@@ -107,34 +107,20 @@ export const Step2BusinessExperience: React.FC<Step2BusinessExperienceProps> = (
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-              Interested Business Role *
-            </label>
-            <select
-              value={step2.interested_business_role}
-              onChange={(e) => setStep2({ ...step2, interested_business_role: e.target.value })}
-              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="Super Stockist">Super Stockist</option>
-              <option value="Distributor">Authorized Distributor</option>
-              <option value="Wholesaler">Wholesaler</option>
-              <option value="Retailer">Retail Outlet</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-              Total Vintage Years in Trade
-            </label>
-            <input
-              type="number"
-              value={step2.vintage_years}
-              onChange={(e) => setStep2({ ...step2, vintage_years: parseFloat(e.target.value || "0") })}
-              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
+            Interested Business Role *
+          </label>
+          <select
+            value={step2.interested_business_role}
+            onChange={(e) => setStep2({ ...step2, interested_business_role: e.target.value })}
+            className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="Super Stockist">Super Stockist</option>
+            <option value="Distributor">Authorized Distributor</option>
+            <option value="Wholesaler">Wholesaler</option>
+            <option value="Retailer">Retail Outlet</option>
+          </select>
         </div>
 
         <div>

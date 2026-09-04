@@ -63,9 +63,8 @@ export default function DistributorPortal() {
     distribution_experience_years: 3,
     serviced_retailers_wholesalers_count: 75,
     interested_business_role: "Distributor",
-    vintage_years: 5,
     approx_monthly_business_inr: 500000,
-    existing_brands: ["Amul", "Fortune", "Parle"],
+    existing_brands: [],
   });
 
   const [step3, setStep3] = useState<Step3Data>({
@@ -361,7 +360,7 @@ export default function DistributorPortal() {
         city: cityClean,
         state: stateClean,
         pin: pinClean,
-        vintage_years: Number(step2.vintage_years) || 1,
+        vintage_years: Number(step2.distribution_experience_years) || 1,
         fmcg_experience_years: Number(step2.distribution_experience_years) || 1,
         distribution_experience_years: Number(step2.distribution_experience_years) || 1,
         approx_monthly_business_inr: Number(step2.approx_monthly_business_inr) || 100000,
