@@ -29,6 +29,7 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
   const [catalogOrders, setCatalogOrders] = useState<any[]>([]);
   const [sampleOrders, setSampleOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState<boolean>(true);
+  const [token, setToken] = useState<string | undefined>(undefined);
 
   // Order Detail Modal State
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
@@ -56,6 +57,10 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
 
   useEffect(() => {
     loadMyOrders();
+    const storedToken = localStorage.getItem("distributor_token");
+    if (storedToken) {
+      setToken(storedToken);
+    }
   }, []);
 
   const totalOrdersCount = catalogOrders.length + sampleOrders.length;
@@ -89,13 +94,21 @@ export const Step9Dashboard: React.FC<Step9DashboardProps> = ({
         />
       )}
 
-      {activeTab === "catalogue" && <ProductCatalogueTab regularProducts={regularProducts} />}
+      {activeTab === "catalogue" && (
+        <ProductCatalogueTab
+          regularProducts={regularProducts}
+          appStatus={appStatus}
+          token={token}
+          onOrderCreated={loadMyOrders}
+        />
+      )}
 
       {activeTab === "credit" && (
         <CreditFacilityTab
           trialActivated={trialActivated}
           appStatus={appStatus}
           onContinueFullOnboarding={onContinueFullOnboarding}
+          token={token}
         />
       )}
 

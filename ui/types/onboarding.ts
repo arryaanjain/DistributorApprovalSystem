@@ -21,6 +21,7 @@ export interface ProductItem {
   is_sample: boolean;
   is_regular: boolean;
   image_url?: string;
+  unit?: string;
 }
 
 export interface Step1Data {
