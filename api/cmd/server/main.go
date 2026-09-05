@@ -24,6 +24,8 @@ import (
 	svcfin "github.com/arryaanjain/DistributorApprovalSystem/internal/service/financial"
 	svconboarding "github.com/arryaanjain/DistributorApprovalSystem/internal/service/onboarding"
 	svcorder "github.com/arryaanjain/DistributorApprovalSystem/internal/service/order"
+	svccycle "github.com/arryaanjain/DistributorApprovalSystem/internal/service/ordercycle"
+	svcrzp "github.com/arryaanjain/DistributorApprovalSystem/internal/service/razorpay"
 	svcshipping "github.com/arryaanjain/DistributorApprovalSystem/internal/service/shipping"
 	svcver "github.com/arryaanjain/DistributorApprovalSystem/internal/service/verification"
 )
@@ -79,6 +81,7 @@ func main() {
 	creditRepo       := repository.NewCreditRepository(pool)
 	orderRepo        := repository.NewOrderRepository(pool)
 	finRepo          := repository.NewFinancialRepository(pool)
+	cycleRepo        := repository.NewCreditCycleRepository(pool)
 
 	// ── Services ───────────────────────────────────────────────────────────
 	msg91     := svcauth.NewMSG91Client(&cfg.MSG91)
@@ -91,6 +94,11 @@ func main() {
 	orderSvc  := svcorder.New(orderRepo, creditRepo, distRepo)
 	finSvc    := svcfin.New(finRepo, orderRepo)
 	srSvc     := svcshipping.NewShiprocketService(&cfg.Shiprocket)
+	rzpClient := svcrzp.NewClient(&cfg.Razorpay)
+	cycleSvc  := svccycle.NewService(creditRepo, cycleRepo, orderRepo, distRepo, agrSvc, rzpClient)
+
+	// Start background watcher for order cycle grace periods & credit hold
+	cycleSvc.StartGracePeriodWatcher(ctx)
 
 	// ── Handlers ───────────────────────────────────────────────────────────
 	handlers := &handler.Registry{
@@ -110,6 +118,7 @@ func main() {
 		Enhancement:   handler.NewEnhancementHandler(finSvc),
 		Admin:         handler.NewAdminHandler(distRepo, verRepo, creditRepo, verSvc, creditSvc, policyLoader),
 		Shipping:      handler.NewShippingHandler(srSvc, orderRepo),
+		CreditCycle:   handler.NewCreditCycleHandler(cycleSvc, rzpClient),
 		// Remaining handlers — stubs until implemented
 		Risk:          &handler.RiskHandler{},
 		Outstanding:   &handler.OutstandingHandler{},

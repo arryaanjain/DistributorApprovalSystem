@@ -335,6 +335,23 @@ func New(deps *Dependencies) http.Handler {
 			r.Get("/", h.Notification.List)
 			r.Post("/{id}/retry", h.Notification.Retry)
 		})
+
+		// ── Order Credit Cycles ───────────────────────────────────────────────
+		r.Route("/credit-cycles", func(r chi.Router) {
+			// Public Webhooks & Callbacks
+			r.Post("/webhooks/razorpay", h.CreditCycle.RazorpayWebhook)
+			r.Get("/orders/{order_id}/esign-callback", h.CreditCycle.ESignCallback)
+
+			// Distributor Protected Routes
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireDistributor(&deps.Cfg.JWT))
+				r.Post("/init", h.CreditCycle.InitCycle)
+				r.Post("/orders/{order_id}/complete-esign", h.CreditCycle.CompleteESign)
+				r.Post("/orders/{order_id}/setup-mandate", h.CreditCycle.SetupMandate)
+				r.Get("/orders/{order_id}", h.CreditCycle.GetCycleDetails)
+				r.Get("/me", h.CreditCycle.GetMine)
+			})
+		})
 	})
 
 	return r
