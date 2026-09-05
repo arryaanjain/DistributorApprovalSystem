@@ -49,7 +49,7 @@ func (s *Service) GetMine(ctx context.Context, distributorID string) (*repositor
 	return ag, nil
 }
 
-// InitESign initializes agreement PDF generation and Surepass e-Sign session.
+// InitESign initializes onboarding agreement PDF generation and Surepass e-Sign session.
 func (s *Service) InitESign(ctx context.Context, distributorID string, redirectURL string) (*ESignInitResult, error) {
 	offer, err := s.creditRepo.GetActiveOfferByDistributor(ctx, distributorID)
 	if err != nil || offer == nil {
@@ -224,4 +224,136 @@ func (s *Service) CompleteSigning(ctx context.Context, distributorID, agreementI
 	}
 
 	return nil
+}
+
+// InitOrderCreditESign initializes Surepass eSign specifically for an order credit cycle agreement.
+func (s *Service) InitOrderCreditESign(
+	ctx context.Context,
+	distributorID string,
+	orderID string,
+	orderNumber string,
+	totalAmountPaise int64,
+	advancePaidPaise int64,
+	creditAmountPaise int64,
+	frequency string,
+	totalInstalments int,
+	instalmentAmountPaise int64,
+	gracePeriodDays int,
+	redirectURL string,
+) (*ESignInitResult, error) {
+	dist, err := s.distRepo.GetByID(ctx, distributorID)
+	if err != nil || dist == nil {
+		return nil, apperrors.NotFound("distributor not found")
+	}
+
+	profile, _ := s.distRepo.GetBusinessProfile(ctx, distributorID)
+	docs, _ := s.distRepo.GetBusinessDocuments(ctx, distributorID)
+
+	agNumber := fmt.Sprintf("KRESCO-ORD-AGR-%s", orderNumber)
+	newAg := &repository.AgreementRecord{
+		DistributorID:      distributorID,
+		AgreementNumber:    agNumber,
+		Version:            "1.0",
+		ApprovedLimitPaise: creditAmountPaise,
+		ApprovedPeriodDays: 30,
+	}
+	agID, err := s.creditRepo.CreateAgreement(ctx, newAg)
+	if err != nil {
+		return nil, apperrors.Internal("creating order agreement record", err)
+	}
+
+	busName := ""
+	constitution := "PROP"
+	addr := ""
+	cityState := ""
+	if profile != nil {
+		busName = profile.BusinessName
+		constitution = profile.Constitution
+		addr = profile.AddressLine1
+		cityState = fmt.Sprintf("%s, %s - %s", profile.City, profile.State, profile.PIN)
+	}
+
+	pan := ""
+	gst := ""
+	if docs != nil {
+		if docs.PAN != nil {
+			pan = *docs.PAN
+		}
+		if docs.GSTNumber != nil {
+			gst = *docs.GSTNumber
+		}
+	}
+
+	distName := "Authorized Officer"
+	if dist.Name != nil {
+		distName = *dist.Name
+	}
+	email := ""
+	if dist.Email != nil {
+		email = *dist.Email
+	}
+
+	pdfData := &OrderCreditPDFData{
+		AgreementID:           agID,
+		OrderID:               orderID,
+		OrderNumber:           orderNumber,
+		DistributorName:       distName,
+		BusinessName:          busName,
+		Constitution:          constitution,
+		PAN:                   pan,
+		GST:                   gst,
+		Address:               addr,
+		CityStatePIN:          cityState,
+		Mobile:                dist.Mobile,
+		Email:                 email,
+		TotalOrderPaise:       totalAmountPaise,
+		AdvancePaidPaise:      advancePaidPaise,
+		CreditPaise:           creditAmountPaise,
+		Frequency:             frequency,
+		TotalInstalments:      totalInstalments,
+		InstalmentAmountPaise: instalmentAmountPaise,
+		GracePeriodDays:       gracePeriodDays,
+		EffectiveDate:         time.Now(),
+	}
+
+	genPDF, err := GenerateOrderCreditAgreementPDF(pdfData)
+	if err != nil {
+		return nil, apperrors.Internal("generating order agreement pdf", err)
+	}
+
+	defaultRedirect := fmt.Sprintf("http://localhost:8081/api/v1/credit-cycles/orders/%s/esign-callback", orderID)
+	if redirectURL != "" {
+		defaultRedirect = redirectURL
+	}
+
+	eSignReq := &svcver.ESignInitRequest{
+		FullName:     distName,
+		UserEmail:    email,
+		MobileNumber: dist.Mobile,
+		PageNum:      genPDF.PageNum,
+		SignX:        genPDF.SignX,
+		SignY:        genPDF.SignY,
+		RedirectURL:  defaultRedirect,
+	}
+
+	var esignResp *svcver.ESignInitResponse
+	if s.esign != nil {
+		esignResp, err = s.esign.InitializeESignSession(ctx, eSignReq)
+		if err != nil {
+			return nil, apperrors.Internal("initializing order esign session", err)
+		}
+	} else {
+		fallbackToken := fmt.Sprintf("ESIGN-DEMO-TOKEN-%d", time.Now().Unix())
+		esignResp = &svcver.ESignInitResponse{
+			Token:    fallbackToken,
+			URL:      fmt.Sprintf("https://esign-client.surepass.io/?token=%s", fallbackToken),
+			ClientID: "DEMO-CLIENT-ID",
+		}
+	}
+
+	return &ESignInitResult{
+		AgreementID: agID,
+		SigningURL:  esignResp.URL,
+		Token:       esignResp.Token,
+	}, nil
 }

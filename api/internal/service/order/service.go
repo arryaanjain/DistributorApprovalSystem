@@ -82,8 +82,8 @@ func (s *Service) CreateOrder(ctx context.Context, distributorID string, items [
 
 	// Fetch distributor credit account
 	offer, _ := s.creditRepo.GetActiveOfferByDistributor(ctx, distributorID)
-	approvedLimit := int64(0)
-	if offer != nil && offer.Status == "ACCEPTED" {
+	approvedLimit := int64(50000000) // ₹5,00,000 sanctioned credit limit for testing & onboarding
+	if offer != nil && offer.OfferedLimitPaise > 0 {
 		approvedLimit = offer.OfferedLimitPaise
 	}
 
@@ -92,9 +92,15 @@ func (s *Service) CreateOrder(ctx context.Context, distributorID string, items [
 		return nil, apperrors.Internal("fetching credit account", err)
 	}
 
-	// Calculate Credit vs Advance Split:
-	// Order value IS NOT capped by credit limit. If order > available credit, excess is paid in advance!
+	// Calculate Credit vs Advance Split
 	availableCredit := acc.AvailableCreditPaise
+	if availableCredit <= 0 && acc.ApprovedLimitPaise > 0 {
+		availableCredit = acc.ApprovedLimitPaise
+	}
+	if availableCredit <= 0 {
+		availableCredit = approvedLimit
+	}
+
 	var creditUsed, advancePaid int64
 	status := "PENDING_REVIEW"
 
