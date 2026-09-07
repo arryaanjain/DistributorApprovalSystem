@@ -7,6 +7,10 @@ interface ProductCatalogueTabProps {
 }
 
 export const ProductCatalogueTab: React.FC<ProductCatalogueTabProps> = ({ regularProducts }) => {
+  const catalogProducts = regularProducts.filter(
+    (p) => !p.is_sample && p.is_regular !== false
+  );
+
   return (
     <div className="bg-slate-900/70 border border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl space-y-5">
       <div>
@@ -19,12 +23,21 @@ export const ProductCatalogueTab: React.FC<ProductCatalogueTabProps> = ({ regula
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-        {regularProducts.map((p) => (
+        {catalogProducts.map((p) => (
           <div
             key={p.id}
             className="p-4 sm:p-5 bg-slate-950/80 border border-slate-800 rounded-xl sm:rounded-2xl space-y-3 hover:border-indigo-500/40 transition-all flex flex-col justify-between"
           >
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {p.image_url ? (
+                <div className="w-full h-32 rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
+                  <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-full h-24 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-center text-indigo-400/40">
+                  <ShoppingBag className="w-8 h-8" />
+                </div>
+              )}
               <div className="flex justify-between items-start gap-2">
                 <div>
                   <h4 className="font-bold text-white text-sm leading-snug">{p.name}</h4>

@@ -9,7 +9,9 @@ import {
   Search, 
   AlertCircle,
   ShoppingBag,
-  Layers
+  Layers,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -24,6 +26,7 @@ interface Product {
   is_active: boolean;
   is_sample: boolean;
   is_regular: boolean;
+  image_url?: string;
 }
 
 type TabType = 'regular' | 'sample' | 'all';
@@ -47,6 +50,7 @@ export const Products: React.FC = () => {
     is_active: true,
     is_sample: false,
     is_regular: true,
+    image_url: '',
   });
 
   useEffect(() => {
@@ -78,6 +82,7 @@ export const Products: React.FC = () => {
       is_active: true,
       is_sample: isSample,
       is_regular: !isSample,
+      image_url: '',
     });
     setError(null);
     setShowModal(true);
@@ -85,9 +90,21 @@ export const Products: React.FC = () => {
 
   const handleOpenEdit = (p: Product) => {
     setEditingProduct(p);
-    setFormData({ ...p });
+    setFormData({ ...p, image_url: p.image_url || '' });
     setError(null);
     setShowModal(true);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (reader.result) {
+        setFormData((prev) => ({ ...prev, image_url: reader.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -315,16 +332,31 @@ export const Products: React.FC = () => {
               {displayedProducts.map((p) => (
                 <tr key={p.id || p.sku} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-6 py-4">
-                    <div className="font-bold text-white flex items-center gap-2">
-                      <span>{p.name}</span>
-                      {p.is_sample && (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
-                          Sample Kit
-                        </span>
+                    <div className="flex items-center gap-3">
+                      {p.image_url ? (
+                        <img
+                          src={p.image_url}
+                          alt={p.name}
+                          className="w-10 h-10 object-cover rounded-xl border border-slate-700 shrink-0 bg-slate-800"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl border border-slate-800 bg-slate-800/80 flex items-center justify-center text-slate-500 shrink-0">
+                          <ImageIcon className="w-5 h-5" />
+                        </div>
                       )}
+                      <div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                          <span>{p.name}</span>
+                          {p.is_sample && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+                              Sample Kit
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 font-mono mt-0.5">{p.sku}</div>
+                        {p.description && <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{p.description}</p>}
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-500 font-mono mt-0.5">{p.sku}</div>
-                    {p.description && <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{p.description}</p>}
                   </td>
                   <td className="px-6 py-4">
                     <span className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg text-xs font-medium border border-slate-700/60">
@@ -482,6 +514,54 @@ export const Products: React.FC = () => {
                     min={1}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                   />
+                </div>
+              </div>
+
+              {/* Product Image Upload & Server URL Handling */}
+              <div className="p-4 bg-slate-800/40 border border-slate-700/60 rounded-xl space-y-3">
+                <label className="block text-xs font-bold uppercase text-slate-300 flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-indigo-400" /> Product Image & Media URL
+                </label>
+                
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border border-slate-700 bg-slate-900 overflow-hidden flex items-center justify-center shrink-0">
+                    {formData.image_url ? (
+                      <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImageIcon className="w-6 h-6 text-slate-600" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                        Upload Image File
+                      </label>
+                      <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs text-slate-200 font-medium cursor-pointer transition-colors">
+                        <Upload className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Choose Image File...</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                        Or Enter Server Image URL
+                      </label>
+                      <input
+                        type="url"
+                        value={formData.image_url || ''}
+                        onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                        placeholder="https://example.com/product-image.jpg"
+                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

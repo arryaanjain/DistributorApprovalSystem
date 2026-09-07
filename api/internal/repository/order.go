@@ -20,6 +20,7 @@ type ProductRecord struct {
 	IsActive    bool      `json:"is_active"`
 	IsSample    bool      `json:"is_sample"`
 	IsRegular   bool      `json:"is_regular"`
+	ImageURL    *string   `json:"image_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -126,8 +127,8 @@ func NewOrderRepository(db *pgxpool.Pool) *OrderRepository {
 
 func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
-		 FROM products WHERE is_active = TRUE ORDER BY name ASC`)
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, image_url, created_at
+		 FROM products WHERE is_active = TRUE AND is_regular = TRUE ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +137,7 @@ func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, er
 	var list []ProductRecord
 	for rows.Next() {
 		p := ProductRecord{}
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.ImageURL, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -146,7 +147,7 @@ func (r *OrderRepository) ListProducts(ctx context.Context) ([]ProductRecord, er
 
 func (r *OrderRepository) ListSampleProducts(ctx context.Context) ([]ProductRecord, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, image_url, created_at
 		 FROM products WHERE is_active = TRUE AND is_sample = TRUE ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
@@ -156,7 +157,7 @@ func (r *OrderRepository) ListSampleProducts(ctx context.Context) ([]ProductReco
 	var list []ProductRecord
 	for rows.Next() {
 		p := ProductRecord{}
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.ImageURL, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -166,7 +167,7 @@ func (r *OrderRepository) ListSampleProducts(ctx context.Context) ([]ProductReco
 
 func (r *OrderRepository) ListAllProductsAdmin(ctx context.Context) ([]ProductRecord, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, image_url, created_at
 		 FROM products ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -176,7 +177,7 @@ func (r *OrderRepository) ListAllProductsAdmin(ctx context.Context) ([]ProductRe
 	var list []ProductRecord
 	for rows.Next() {
 		p := ProductRecord{}
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.ImageURL, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -187,9 +188,9 @@ func (r *OrderRepository) ListAllProductsAdmin(ctx context.Context) ([]ProductRe
 func (r *OrderRepository) CreateProduct(ctx context.Context, p *ProductRecord) (string, error) {
 	var id string
 	err := r.db.QueryRow(ctx,
-		`INSERT INTO products (sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		p.SKU, p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular,
+		`INSERT INTO products (sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, image_url)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+		p.SKU, p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular, p.ImageURL,
 	).Scan(&id)
 	return id, err
 }
@@ -198,19 +199,19 @@ func (r *OrderRepository) UpdateProduct(ctx context.Context, p *ProductRecord) e
 	_, err := r.db.Exec(ctx,
 		`UPDATE products
 		 SET name = $1, description = $2, category = $3, price_paise = $4, moq = $5,
-		     is_active = $6, is_sample = $7, is_regular = $8
-		 WHERE id = $9`,
-		p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular, p.ID,
+		     is_active = $6, is_sample = $7, is_regular = $8, image_url = $9
+		 WHERE id = $10`,
+		p.Name, p.Description, p.Category, p.PricePaise, p.Moq, p.IsActive, p.IsSample, p.IsRegular, p.ImageURL, p.ID,
 	)
 	return err
 }
 
 func (r *OrderRepository) GetProductByID(ctx context.Context, id string) (*ProductRecord, error) {
 	row := r.db.QueryRow(ctx,
-		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, created_at
+		`SELECT id, sku, name, description, category, price_paise, moq, is_active, is_sample, is_regular, image_url, created_at
 		 FROM products WHERE id = $1`, id)
 	p := &ProductRecord{}
-	err := row.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &p.Category, &p.PricePaise, &p.Moq, &p.IsActive, &p.IsSample, &p.IsRegular, &p.ImageURL, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

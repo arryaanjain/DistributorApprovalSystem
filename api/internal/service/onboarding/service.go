@@ -123,6 +123,11 @@ func (s *Service) SubmitBusiness(ctx context.Context, distributorID string, in *
 		distExp = in.FMCGExperienceYears
 	}
 
+	vintageYears := in.VintageYears
+	if vintageYears == 0 && distExp > 0 {
+		vintageYears = distExp
+	}
+
 	servicedCount := in.ServicedRetailersWholesalersCount
 	if servicedCount == 0 && in.RetailerCount > 0 {
 		servicedCount = in.RetailerCount
@@ -137,7 +142,7 @@ func (s *Service) SubmitBusiness(ctx context.Context, distributorID string, in *
 		City:                              in.City,
 		State:                             in.State,
 		PIN:                               in.PIN,
-		VintageYears:                      nonZeroFloat64(in.VintageYears),
+		VintageYears:                      nonZeroFloat64(vintageYears),
 		FMCGExperienceYears:               nonZeroFloat64(in.FMCGExperienceYears),
 		DistributionExperienceYears:       nonZeroFloat64(distExp),
 		ApproxMonthlyBusinessPaise:        nonZeroInt64(monthlyPaise),

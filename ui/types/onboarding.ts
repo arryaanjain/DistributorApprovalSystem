@@ -20,6 +20,7 @@ export interface ProductItem {
   moq: number;
   is_sample: boolean;
   is_regular: boolean;
+  image_url?: string;
 }
 
 export interface Step1Data {
@@ -38,7 +39,7 @@ export interface Step2Data {
   distribution_experience_years: number;
   serviced_retailers_wholesalers_count: number;
   interested_business_role: string;
-  vintage_years: number;
+  vintage_years?: number;
   approx_monthly_business_inr: number;
   existing_brands: string[] | string;
 }
