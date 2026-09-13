@@ -273,8 +273,8 @@ func (r *OrderRepository) CreateOrder(ctx context.Context, o *OrderRecord, items
 	var orderID string
 	err = tx.QueryRow(ctx,
 		`INSERT INTO orders
-		 (order_number, distributor_id, total_amount_paise, advance_paid_paise, credit_used_paise, status)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		 (order_number, distributor_id, subtotal_paise, total_paise, total_amount_paise, advance_paid_paise, credit_used_paise, status)
+		 VALUES ($1, $2, $3, $3, $3, $4, $5, $6) RETURNING id`,
 		o.OrderNumber, o.DistributorID, o.TotalAmountPaise, o.AdvancePaidPaise, o.CreditUsedPaise, o.Status,
 	).Scan(&orderID)
 	if err != nil {
@@ -729,5 +729,23 @@ func (r *OrderRepository) GetSampleOrderByAWB(ctx context.Context, awbCode strin
 	}
 	return s, err
 }
+
+func (r *OrderRepository) GetOrderByID(ctx context.Context, id string) (*OrderRecord, error) {
+	row := r.db.QueryRow(ctx,
+		`SELECT id, order_number, distributor_id,
+		        COALESCE(NULLIF(total_amount_paise, 0), total_paise, 0) as total_amount_paise,
+		        COALESCE(advance_paid_paise, 0) as advance_paid_paise,
+		        COALESCE(NULLIF(credit_used_paise, 0), credit_utilized_paise, 0) as credit_used_paise,
+		        status, payment_proof_url, utr_reference, reviewed_by, reviewed_at, review_notes, dispatched_at, created_at
+		 FROM orders WHERE id = $1`, id)
+	o := &OrderRecord{}
+	err := row.Scan(&o.ID, &o.OrderNumber, &o.DistributorID, &o.TotalAmountPaise, &o.AdvancePaidPaise,
+		&o.CreditUsedPaise, &o.Status, &o.PaymentProofURL, &o.UTRReference, &o.ReviewedBy, &o.ReviewedAt, &o.ReviewNotes, &o.DispatchedAt, &o.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return o, err
+}
+
 
 

@@ -253,11 +253,15 @@ func (r *CreditRepository) UpdateOfferStatus(ctx context.Context, offerID, statu
 
 func (r *CreditRepository) CreateAgreement(ctx context.Context, a *AgreementRecord) (string, error) {
 	var id string
+	var appID *string
+	if a.ApplicationID != "" {
+		appID = &a.ApplicationID
+	}
 	err := r.db.QueryRow(ctx,
 		`INSERT INTO distributor_agreements
 		 (distributor_id, application_id, agreement_number, version, approved_limit_paise, approved_period_days)
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		a.DistributorID, a.ApplicationID, a.AgreementNumber, a.Version, a.ApprovedLimitPaise, a.ApprovedPeriodDays,
+		a.DistributorID, appID, a.AgreementNumber, a.Version, a.ApprovedLimitPaise, a.ApprovedPeriodDays,
 	).Scan(&id)
 	return id, err
 }

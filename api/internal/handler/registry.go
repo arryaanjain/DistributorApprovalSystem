@@ -34,6 +34,7 @@ type Registry struct {
 	Audit         *AuditHandler
 	Notification  *NotificationHandler
 	Shipping      *ShippingHandler
+	CreditCycle   *CreditCycleHandler
 }
 
 // ────────────────────────────────────────────────────────────────────────────
