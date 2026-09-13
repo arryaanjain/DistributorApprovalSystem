@@ -41,10 +41,12 @@ export const CreditOrderFlow: React.FC<CreditOrderFlowProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Flow State
   const [cycleData, setCycleData] = useState<any>(null);
   const [signingUrl, setSigningUrl] = useState<string | null>(null);
   const [mandateUrl, setMandateUrl] = useState<string | null>(null);
+
+  // Environment flag — set NEXT_PUBLIC_ENV=production to hide dev-only simulate buttons
+  const isDev = process.env.NEXT_PUBLIC_ENV !== "production";
 
   const effectiveTotalPaise =
     cycleData?.total_amount_paise && cycleData.total_amount_paise > 0
@@ -308,14 +310,17 @@ export const CreditOrderFlow: React.FC<CreditOrderFlowProps> = ({
                     <ExternalLink className="w-4 h-4" />
                   </a>
                 )}
-                <button
-                  type="button"
-                  onClick={handleSimulateESignCompletion}
-                  className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Confirm eSign Completed & Proceed to Mandate</span>
-                </button>
+                {isDev && (
+                  <button
+                    type="button"
+                    onClick={handleSimulateESignCompletion}
+                    disabled={loading}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>[DEV] Confirm eSign Completed &amp; Proceed to Mandate</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -345,14 +350,16 @@ export const CreditOrderFlow: React.FC<CreditOrderFlowProps> = ({
                 </a>
               )}
 
-              <button
-                type="button"
-                onClick={handleSimulateMandateCompletion}
-                className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Verify Mandate & Activate Order Cycle</span>
-              </button>
+              {isDev && (
+                <button
+                  type="button"
+                  onClick={handleSimulateMandateCompletion}
+                  className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>[DEV] Verify Mandate &amp; Activate Order Cycle</span>
+                </button>
+              )}
             </div>
           )}
 
