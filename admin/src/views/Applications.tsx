@@ -7,7 +7,10 @@ import {
   FileText,
   Zap,
   AlertCircle,
-  Download
+  Download,
+  Search,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useSearchParams } from 'react-router-dom';
@@ -24,6 +27,9 @@ export const Applications: React.FC = () => {
   const [actionMessage, setActionMessage] = useState<string>('');
   const [overrideLimit, setOverrideLimit] = useState<string>('');
   const [overrideDays, setOverrideDays] = useState<number>(15);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -39,6 +45,7 @@ export const Applications: React.FC = () => {
 
   useEffect(() => {
     loadApplications();
+    setCurrentPage(1);
   }, [statusFilter]);
 
   useEffect(() => {
@@ -265,6 +272,16 @@ export const Applications: React.FC = () => {
           <p className="text-sm text-slate-400 mt-1">Review onboarding submissions, step progress, Surepass verifications, and credit sanctions.</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              placeholder="Search name, mobile, business..."
+              className="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded-xl pl-8 pr-3 py-2 w-52 focus:outline-none focus:border-indigo-500 placeholder-slate-500"
+            />
+          </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -300,42 +317,95 @@ export const Applications: React.FC = () => {
             <div className="py-12 text-center text-slate-500 text-sm">Loading applications...</div>
           ) : applications.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-sm">No applications found matching filter.</div>
-          ) : (
-            <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
-              {applications.map((app) => {
-                const isSelected = selectedApp?.id === app.id;
-                const stepInfo = getStepInfo(app.status);
-                return (
-                  <div
-                    key={app.id}
-                    onClick={() => {
-                      setSearchParams({ id: app.id });
-                      loadDetail(app.id);
-                    }}
-                    className={`p-4 rounded-xl cursor-pointer border transition-all ${
-                      isSelected
-                        ? 'bg-indigo-600/15 border-indigo-500/50 shadow-lg shadow-indigo-600/10'
-                        : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="font-bold text-white text-sm">{app.distributor_name || 'Distributor'}</p>
-                      <span className="text-[11px] font-mono text-indigo-400">{app.distributor_mobile}</span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1 truncate">{app.business_name || 'Business Name Pending'}</p>
-                    <div className="flex items-center justify-between mt-3">
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${stepInfo.badgeClass}`}>
-                        {stepInfo.label}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        {new Date(app.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
+          ) : (() => {
+            const filtered = applications.filter((app) => {
+              const term = searchTerm.toLowerCase();
+              return (
+                !term ||
+                (app.distributor_name && app.distributor_name.toLowerCase().includes(term)) ||
+                (app.distributor_mobile && app.distributor_mobile.includes(term)) ||
+                (app.business_name && app.business_name.toLowerCase().includes(term))
+              );
+            });
+            const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+            const safePage = Math.min(currentPage, totalPages);
+            const paginated = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+            return (
+              <>
+                <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+                  {paginated.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-sm">No applications match your search.</div>
+                  ) : paginated.map((app) => {
+                    const isSelected = selectedApp?.id === app.id;
+                    const stepInfo = getStepInfo(app.status);
+                    return (
+                      <div
+                        key={app.id}
+                        onClick={() => {
+                          setSearchParams({ id: app.id });
+                          loadDetail(app.id);
+                        }}
+                        className={`p-4 rounded-xl cursor-pointer border transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600/15 border-indigo-500/50 shadow-lg shadow-indigo-600/10'
+                            : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <p className="font-bold text-white text-sm">{app.distributor_name || 'Distributor'}</p>
+                          <span className="text-[11px] font-mono text-indigo-400">{app.distributor_mobile}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 truncate">{app.business_name || 'Business Name Pending'}</p>
+                        <div className="flex items-center justify-between mt-3">
+                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${stepInfo.badgeClass}`}>
+                            {stepInfo.label}
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            {new Date(app.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pagination Controls */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800 mt-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500">
+                      {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} of {filtered.length}
+                    </span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                      className="bg-slate-900 border border-slate-700 text-[11px] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value={10}>10 / page</option>
+                      <option value={25}>25 / page</option>
+                      <option value={50}>50 / page</option>
+                    </select>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={safePage <= 1}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[11px] text-slate-400 px-2">{safePage} / {totalPages}</span>
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={safePage >= totalPages}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* Application Detailed Review Drawer */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, RefreshCw, CheckCircle2, Clock, FileText, History, X, ShieldCheck, Award } from 'lucide-react';
+import { Search, RefreshCw, CheckCircle2, Clock, FileText, History, X, ShieldCheck, Award, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../services/api';
 
 export const Distributors: React.FC = () => {
@@ -11,6 +11,8 @@ export const Distributors: React.FC = () => {
   const [selectedDist, setSelectedDist] = useState<any | null>(null);
   const [trail, setTrail] = useState<any[]>([]);
   const [loadingTrail, setLoadingTrail] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const loadDistributors = async () => {
     setLoading(true);
@@ -51,6 +53,10 @@ export const Distributors: React.FC = () => {
     );
   });
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginated = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   const formatINR = (paise?: number) => {
     if (!paise || paise === 0) return '₹0';
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(paise / 100);
@@ -90,7 +96,7 @@ export const Distributors: React.FC = () => {
         <input
           type="text"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
           placeholder="Filter by name, mobile, business..."
           className="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
         />
@@ -117,7 +123,7 @@ export const Distributors: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {filtered.map((d) => (
+                {paginated.map((d) => (
                   <tr key={d.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
                       <div className="w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
@@ -169,6 +175,41 @@ export const Distributors: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Controls */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-800 mt-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">
+                {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} of {filtered.length} distributors
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                className="bg-slate-900 border border-slate-700 text-[11px] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500"
+              >
+                <option value={10}>10 / page</option>
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[11px] text-slate-400 px-2">{safePage} / {totalPages}</span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>
