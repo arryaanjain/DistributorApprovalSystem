@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Bell, ShieldCheck } from 'lucide-react';
+import { Bell, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Navbar: React.FC = () => {
@@ -7,14 +7,9 @@ export const Navbar: React.FC = () => {
 
   return (
     <header className="h-16 glass-panel border-b border-slate-800/80 px-8 flex items-center justify-between sticky top-0 z-20">
-      {/* Search Input */}
-      <div className="relative w-72">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          placeholder="Search GST, PAN, Distributor..."
-          className="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl pl-10 pr-4 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-        />
+      {/* Brand / Left spacer */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-slate-400">Distributor Approval System</span>
       </div>
 
       {/* Right Controls */}

@@ -45,11 +45,15 @@ export const Distributors: React.FC = () => {
   };
 
   const filtered = distributors.filter((d) => {
-    const term = searchTerm.toLowerCase();
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
     return (
       (d.name && d.name.toLowerCase().includes(term)) ||
-      (d.mobile && d.mobile.includes(term)) ||
-      (d.business_name && d.business_name.toLowerCase().includes(term))
+      (d.mobile && d.mobile.toLowerCase().includes(term)) ||
+      (d.email && d.email.toLowerCase().includes(term)) ||
+      (d.business_name && d.business_name.toLowerCase().includes(term)) ||
+      (d.agreement_status && d.agreement_status.toLowerCase().includes(term)) ||
+      (d.id && d.id.toLowerCase().includes(term))
     );
   });
 
@@ -91,15 +95,31 @@ export const Distributors: React.FC = () => {
       </div>
 
       {/* Filter Bar */}
-      <div className="relative w-80">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-          placeholder="Filter by name, mobile, business..."
-          className="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-        />
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative w-full max-w-md">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+            placeholder="Search by name, mobile, business, status, or ID..."
+            className="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        {searchTerm && (
+          <div className="text-xs text-slate-400 font-medium">
+            Found <span className="text-indigo-400 font-bold">{filtered.length}</span> matching {filtered.length === 1 ? 'distributor' : 'distributors'}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -107,110 +127,122 @@ export const Distributors: React.FC = () => {
         {loading ? (
           <div className="py-12 text-center text-slate-500 text-sm">Loading distributor directory...</div>
         ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-slate-500 text-sm">No distributors found.</div>
+          <div className="py-12 text-center text-slate-500 text-sm flex flex-col items-center justify-center gap-3">
+            <p>No distributors found matching "{searchTerm}".</p>
+            {searchTerm && (
+              <button
+                onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
+                className="px-3 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold hover:bg-indigo-500/20 transition-colors"
+              >
+                Clear Search Filter
+              </button>
+            )}
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="py-3.5 px-4 font-semibold">Distributor Name</th>
-                  <th className="py-3.5 px-4 font-semibold">Mobile</th>
-                  <th className="py-3.5 px-4 font-semibold">Business Name</th>
-                  <th className="py-3.5 px-4 font-semibold">Sanctioned Limit</th>
-                  <th className="py-3.5 px-4 font-semibold">Agreement Status</th>
-                  <th className="py-3.5 px-4 font-semibold">Account Status</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Audit Trail</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {paginated.map((d) => (
-                  <tr key={d.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
-                        {d.name ? d.name.charAt(0) : 'D'}
-                      </div>
-                      <span>{d.name || 'Onboarding Applicant'}</span>
-                    </td>
-                    <td className="py-3.5 px-4 font-mono text-xs text-slate-400">{d.mobile}</td>
-                    <td className="py-3.5 px-4 text-slate-300">{d.business_name || 'Pending Onboarding'}</td>
-                    <td className="py-3.5 px-4 font-bold text-emerald-400">
-                      {formatINR(d.approved_limit_paise)}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {d.agreement_status === 'SIGNED' ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-medium">
-                          <FileText className="w-3 h-3 text-emerald-400" /> SureSign Executed
-                        </span>
-                      ) : d.agreement_status === 'GENERATED' ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20 font-medium">
-                          <Clock className="w-3 h-3 text-amber-400" /> Pending Signature
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-full border border-slate-700 font-medium">
-                          Not Executed
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {d.is_active ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Credit Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          <Clock className="w-3.5 h-3.5" /> Onboarding / Pending
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <button
-                        onClick={() => openCreditTrail(d)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition-colors"
-                      >
-                        <History className="w-3.5 h-3.5" />
-                        <span>Credit Trail</span>
-                      </button>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-300">
+                <thead className="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="py-3.5 px-4 font-semibold">Distributor Name</th>
+                    <th className="py-3.5 px-4 font-semibold">Mobile</th>
+                    <th className="py-3.5 px-4 font-semibold">Business Name</th>
+                    <th className="py-3.5 px-4 font-semibold">Sanctioned Limit</th>
+                    <th className="py-3.5 px-4 font-semibold">Agreement Status</th>
+                    <th className="py-3.5 px-4 font-semibold">Account Status</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">Audit Trail</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {paginated.map((d) => (
+                    <tr key={d.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
+                          {d.name ? d.name.charAt(0) : 'D'}
+                        </div>
+                        <span>{d.name || 'Onboarding Applicant'}</span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-xs text-slate-400">{d.mobile}</td>
+                      <td className="py-3.5 px-4 text-slate-300">{d.business_name || 'Pending Onboarding'}</td>
+                      <td className="py-3.5 px-4 font-bold text-emerald-400">
+                        {formatINR(d.approved_limit_paise)}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {d.agreement_status === 'SIGNED' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-medium">
+                            <FileText className="w-3 h-3 text-emerald-400" /> SureSign Executed
+                          </span>
+                        ) : d.agreement_status === 'GENERATED' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20 font-medium">
+                            <Clock className="w-3 h-3 text-amber-400" /> Pending Signature
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-full border border-slate-700 font-medium">
+                            Not Executed
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {d.is_active ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Credit Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            <Clock className="w-3.5 h-3.5" /> Onboarding / Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          onClick={() => openCreditTrail(d)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition-colors"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <span>Credit Trail</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          {/* Pagination Controls */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-800 mt-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">
-                {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} of {filtered.length} distributors
-              </span>
-              <select
-                value={pageSize}
-                onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                className="bg-slate-900 border border-slate-700 text-[11px] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500"
-              >
-                <option value={10}>10 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-              </select>
+            {/* Pagination Controls */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-800 mt-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500">
+                  {filtered.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filtered.length)}`} of {filtered.length} distributors
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  className="bg-slate-900 border border-slate-700 text-[11px] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value={10}>10 / page</option>
+                  <option value={25}>25 / page</option>
+                  <option value={50}>50 / page</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[11px] text-slate-400 px-2">{safePage} / {totalPages}</span>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[11px] text-slate-400 px-2">{safePage} / {totalPages}</span>
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+          </>
         )}
       </div>
 
