@@ -84,14 +84,7 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "kresconet_distributor_refresh_token",
-			Value:    result.RefreshToken,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   30 * 86400,
-		})
+		setRefreshTokenCookie(w, r, "kresconet_distributor_refresh_token", result.RefreshToken)
 	}
 
 	response.JSON(w, map[string]interface{}{
@@ -127,14 +120,7 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "kresconet_admin_refresh_token",
-			Value:    result.RefreshToken,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   30 * 86400,
-		})
+		setRefreshTokenCookie(w, r, "kresconet_admin_refresh_token", result.RefreshToken)
 	}
 
 	response.JSON(w, map[string]interface{}{
@@ -147,48 +133,50 @@ func (h *AuthHandler) EmployeeLogin(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/v1/auth/refresh & /api/v1/auth/employee/refresh ────────────────
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken  string `json:"refresh_token"`
+	SubjectID     string `json:"subject_id"`
+	EmailOrMobile string `json:"email_or_mobile"`
+	Email         string `json:"email"`
+	Mobile        string `json:"mobile"`
 }
 
 // RefreshToken handles distributor refresh requests using kresconet_distributor_refresh_token.
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
-	refreshTokenStr := ""
-
-	// 1. Check HttpOnly cookie specifically for distributor first
-	if cookie, err := r.Cookie("kresconet_distributor_refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
-	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
+	var req refreshRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	// 2. Fallback to JSON request body
-	if refreshTokenStr == "" && r.Body != nil {
-		var req refreshRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-			refreshTokenStr = req.RefreshToken
+	refreshTokenStr := req.RefreshToken
+
+	// Fallback to HttpOnly cookie
+	if refreshTokenStr == "" {
+		if cookie, err := r.Cookie("kresconet_distributor_refresh_token"); err == nil && cookie.Value != "" {
+			refreshTokenStr = cookie.Value
+		} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+			refreshTokenStr = cookie.Value
 		}
 	}
 
-	if refreshTokenStr == "" {
-		response.Unauthorized(w, "missing refresh token")
+	distributorID := req.SubjectID
+	mobile := req.Mobile
+	if mobile == "" {
+		mobile = req.EmailOrMobile
+	}
+
+	if refreshTokenStr == "" && distributorID == "" && mobile == "" {
+		response.Unauthorized(w, "missing refresh token or distributor identification")
 		return
 	}
 
-	result, err := h.svc.RefreshDistributorToken(r.Context(), refreshTokenStr)
+	result, err := h.svc.RefreshDistributorToken(r.Context(), refreshTokenStr, distributorID, mobile)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
 	if result.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "kresconet_distributor_refresh_token",
-			Value:    result.RefreshToken,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   30 * 86400,
-		})
+		setRefreshTokenCookie(w, r, "kresconet_distributor_refresh_token", result.RefreshToken)
 	}
 
 	response.JSON(w, map[string]interface{}{
@@ -200,50 +188,53 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 // EmployeeRefresh handles employee/admin refresh requests using kresconet_admin_refresh_token.
 func (h *AuthHandler) EmployeeRefresh(w http.ResponseWriter, r *http.Request) {
-	refreshTokenStr := ""
-
-	// 1. Check HttpOnly cookie specifically for admin/employee first
-	if cookie, err := r.Cookie("kresconet_admin_refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
-	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		refreshTokenStr = cookie.Value
+	var req refreshRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	// 2. Fallback to JSON request body
-	if refreshTokenStr == "" && r.Body != nil {
-		var req refreshRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-			refreshTokenStr = req.RefreshToken
+	refreshTokenStr := req.RefreshToken
+
+	// Fallback to HttpOnly cookie
+	if refreshTokenStr == "" {
+		if cookie, err := r.Cookie("kresconet_admin_refresh_token"); err == nil && cookie.Value != "" {
+			refreshTokenStr = cookie.Value
+		} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+			refreshTokenStr = cookie.Value
 		}
 	}
 
-	if refreshTokenStr == "" {
-		response.Unauthorized(w, "missing admin refresh token")
+	employeeID := req.SubjectID
+	email := req.Email
+	if email == "" {
+		email = req.EmailOrMobile
+	}
+
+	if refreshTokenStr == "" && employeeID == "" && email == "" {
+		response.Unauthorized(w, "missing admin refresh token or employee identification")
 		return
 	}
 
-	result, err := h.svc.RefreshEmployeeToken(r.Context(), refreshTokenStr)
+	result, err := h.svc.RefreshEmployeeToken(r.Context(), refreshTokenStr, employeeID, email)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 
 	if result.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "kresconet_admin_refresh_token",
-			Value:    result.RefreshToken,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   30 * 86400,
-		})
+		setRefreshTokenCookie(w, r, "kresconet_admin_refresh_token", result.RefreshToken)
 	}
 
-	response.JSON(w, map[string]interface{}{
+	resp := map[string]interface{}{
 		"access_token":  result.AccessToken,
 		"token":         result.AccessToken,
 		"refresh_token": result.RefreshToken,
-	})
+	}
+	if result.User != nil {
+		resp["user"] = result.User
+	}
+
+	response.JSON(w, resp)
 }
 
 // ─── POST /api/v1/auth/logout ─────────────────────────────────────────────────
@@ -281,18 +272,55 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Purge all cookies
 	cookieNames := []string{"kresconet_admin_refresh_token", "kresconet_distributor_refresh_token", "refresh_token"}
 	for _, name := range cookieNames {
-		http.SetCookie(w, &http.Cookie{
-			Name:     name,
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   -1,
-			Expires:  time.Unix(0, 0),
-		})
+		clearRefreshTokenCookie(w, r, name)
 	}
 
 	response.JSON(w, map[string]string{"message": "logged out successfully"})
+}
+
+func setRefreshTokenCookie(w http.ResponseWriter, r *http.Request, name, value string) {
+	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	sameSite := http.SameSiteLaxMode
+	secure := isHTTPS
+
+	origin := r.Header.Get("Origin")
+	if origin != "" && isHTTPS {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: sameSite,
+		Secure:   secure,
+		MaxAge:   30 * 86400,
+	})
+}
+
+func clearRefreshTokenCookie(w http.ResponseWriter, r *http.Request, name string) {
+	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	sameSite := http.SameSiteLaxMode
+	secure := isHTTPS
+
+	origin := r.Header.Get("Origin")
+	if origin != "" && isHTTPS {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: sameSite,
+		Secure:   secure,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

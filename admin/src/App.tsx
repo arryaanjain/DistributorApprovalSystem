@@ -10,11 +10,16 @@ import { Products } from './views/Products';
 import { Orders } from './views/Orders';
 import { Policy } from './views/Policy';
 import { Login } from './views/Login';
+import { AsyncSessionGatekeeper } from './components/AsyncSessionGatekeeper';
 
 const AdminLayout: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { authStatus, error, retrySessionRecovery } = useAuth();
 
-  if (!isAuthenticated) {
+  if (authStatus === 'INITIALIZING') {
+    return <AsyncSessionGatekeeper error={error} onRetry={retrySessionRecovery} />;
+  }
+
+  if (authStatus === 'UNAUTHENTICATED') {
     return <Login />;
   }
 
