@@ -132,10 +132,57 @@ func (r *RefreshTokenRepository) GetLatestValidForSubject(ctx context.Context, s
 	return rec, err
 }
 
+// GetLatestValidForSubjectOrIdentifier retrieves the most recently created active refresh token for a subject by ID or email/mobile.
+func (r *RefreshTokenRepository) GetLatestValidForSubjectOrIdentifier(ctx context.Context, subjectID, identifier, subjectType string) (*RefreshTokenRecord, error) {
+	var row pgx.Row
+	if subjectID != "" && identifier != "" {
+		row = r.db.QueryRow(ctx,
+			`SELECT id, token, subject_id, subject_type, email_or_mobile, role, expires_at, revoked, created_at, updated_at
+			 FROM refresh_tokens
+			 WHERE subject_type = $3 AND revoked = FALSE AND expires_at > NOW()
+			   AND (subject_id = $1 OR email_or_mobile = $2)
+			 ORDER BY created_at DESC LIMIT 1`,
+			subjectID, identifier, subjectType,
+		)
+	} else if subjectID != "" {
+		row = r.db.QueryRow(ctx,
+			`SELECT id, token, subject_id, subject_type, email_or_mobile, role, expires_at, revoked, created_at, updated_at
+			 FROM refresh_tokens
+			 WHERE subject_type = $2 AND revoked = FALSE AND expires_at > NOW()
+			   AND subject_id = $1
+			 ORDER BY created_at DESC LIMIT 1`,
+			subjectID, subjectType,
+		)
+	} else if identifier != "" {
+		row = r.db.QueryRow(ctx,
+			`SELECT id, token, subject_id, subject_type, email_or_mobile, role, expires_at, revoked, created_at, updated_at
+			 FROM refresh_tokens
+			 WHERE subject_type = $2 AND revoked = FALSE AND expires_at > NOW()
+			   AND email_or_mobile = $1
+			 ORDER BY created_at DESC LIMIT 1`,
+			identifier, subjectType,
+		)
+	} else {
+		return nil, nil
+	}
+
+	rec := &RefreshTokenRecord{}
+	err := row.Scan(
+		&rec.ID, &rec.Token, &rec.SubjectID, &rec.SubjectType,
+		&rec.EmailOrMobile, &rec.Role, &rec.ExpiresAt, &rec.Revoked,
+		&rec.CreatedAt, &rec.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return rec, err
+}
+
 // DeleteExpired purges expired and revoked tokens from the database.
 func (r *RefreshTokenRepository) DeleteExpired(ctx context.Context) error {
 	_, err := r.db.Exec(ctx,
-		`DELETE FROM refresh_tokens WHERE expires_at <= NOW() OR revoked = TRUE`,
+		`DELETE FROM refresh_tokens WHERE expires_at <= NOW() OR (revoked = TRUE AND updated_at < NOW() - INTERVAL '10 minutes')`,
 	)
 	return err
 }
+

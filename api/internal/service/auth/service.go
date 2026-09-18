@@ -202,8 +202,9 @@ type EmployeeLoginResult struct {
 
 // RefreshResult holds rotated access and refresh tokens.
 type RefreshResult struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string           `json:"access_token"`
+	RefreshToken string           `json:"refresh_token"`
+	User         *EmployeeProfile `json:"user,omitempty"`
 }
 
 // EmployeeProfile is safe to return to the frontend (no password hash).
@@ -258,79 +259,58 @@ func (s *Service) EmployeeLogin(ctx context.Context, email, password string) (*E
 	}, nil
 }
 
-// RefreshToken validates a long-lived Postgres DB refresh token, rotates it (issues a NEW refresh token + access token), and revokes the old refresh token.
-func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*RefreshResult, error) {
-	if refreshTokenStr == "" {
-		return nil, apperrors.Unauthorized("missing refresh token")
-	}
-
+// RefreshTokenWithSubject validates a long-lived Postgres DB refresh token or active Postgres session for a subject, rotates it (issues a NEW refresh token + access token), and revokes the old refresh token.
+func (s *Service) RefreshTokenWithSubject(ctx context.Context, refreshTokenStr, subjectID, identifier, expectedSubjectType string) (*RefreshResult, error) {
 	if s.refreshTokenRepo == nil {
 		return nil, apperrors.Unauthorized("refresh token repo unavailable")
 	}
 
-	rec, err := s.refreshTokenRepo.GetValid(ctx, refreshTokenStr)
-	if err != nil {
-		return nil, apperrors.Internal("verifying refresh token from DB", err)
+	var rec *repository.RefreshTokenRecord
+	var err error
+
+	// 1. First attempt direct token lookup if token string is provided
+	if refreshTokenStr != "" {
+		rec, err = s.refreshTokenRepo.GetValid(ctx, refreshTokenStr)
+		if err != nil {
+			return nil, apperrors.Internal("verifying refresh token from DB", err)
+		}
 	}
 
-	// Reuse detection: if token is not valid, check if it was previously revoked (potential theft attack)
+	// 2. Reuse detection & session recovery from Postgres DB:
+	// If direct token match is missing/revoked/expired, check if subject has any active valid token in Postgres DB
 	if rec == nil {
-		anyRec, _ := s.refreshTokenRepo.GetAny(ctx, refreshTokenStr)
-		if anyRec != nil && anyRec.Revoked {
-			// Only trigger nuclear revocation if token was revoked MORE THAN 15 seconds ago.
-			// Recent revocations (< 15s) are typically race conditions from parallel frontend requests.
-			if time.Since(anyRec.UpdatedAt) > 15*time.Second {
-				slog.Warn("REVOKED REFRESH TOKEN REUSE DETECTED! Revoking all sessions for subject",
-					"subject_id", anyRec.SubjectID, "subject_type", anyRec.SubjectType)
-				_ = s.refreshTokenRepo.RevokeAllForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
-				return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
-			}
-
-			slog.Info("Recently rotated refresh token re-submitted within 15s grace window",
-				"subject_id", anyRec.SubjectID, "subject_type", anyRec.SubjectType)
-
-			// Grace window handling: issue a fresh access token for the subject without breaking session
-			var newAccessToken string
-			activeRefreshToken := refreshTokenStr
-
-			latestRec, err := s.refreshTokenRepo.GetLatestValidForSubject(ctx, anyRec.SubjectID, anyRec.SubjectType)
-			if err == nil && latestRec != nil {
-				activeRefreshToken = latestRec.Token
-			}
-
-			if anyRec.SubjectType == "employee" {
-				user, err := s.userRepo.GetByID(ctx, anyRec.SubjectID)
-				if err == nil && user != nil && user.IsActive {
-					newAccessToken, err = s.issueEmployeeToken(user.ID, user.Email, user.Role, s.cfg.JWT.AccessExpiry)
-					if err == nil {
-						return &RefreshResult{
-							AccessToken:  newAccessToken,
-							RefreshToken: activeRefreshToken,
-						}, nil
-					}
-				}
-			} else if anyRec.SubjectType == "distributor" {
-				dist, err := s.distRepo.GetByID(ctx, anyRec.SubjectID)
-				if err == nil && dist != nil {
-					newAccessToken, err = s.issueDistributorToken(dist.ID, dist.Mobile)
-					if err == nil {
-						return &RefreshResult{
-							AccessToken:  newAccessToken,
-							RefreshToken: activeRefreshToken,
-						}, nil
-					}
+		if refreshTokenStr != "" {
+			anyRec, _ := s.refreshTokenRepo.GetAny(ctx, refreshTokenStr)
+			if anyRec != nil {
+				subjectID = anyRec.SubjectID
+				if expectedSubjectType == "" {
+					expectedSubjectType = anyRec.SubjectType
 				}
 			}
 		}
-		return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
+
+		if subjectID != "" || identifier != "" {
+			rec, _ = s.refreshTokenRepo.GetLatestValidForSubjectOrIdentifier(ctx, subjectID, identifier, expectedSubjectType)
+		}
+
+		if rec == nil {
+			return nil, apperrors.Unauthorized("refresh token expired or invalid, please login again")
+		}
+	}
+
+	if expectedSubjectType != "" && rec.SubjectType != expectedSubjectType {
+		return nil, apperrors.Unauthorized("invalid token subject type")
 	}
 
 	var newAccessToken string
 	var newRefreshTokenStr string
+	var empProfile *EmployeeProfile
 	refreshExpiry := time.Now().Add(30 * 24 * time.Hour)
 
 	// Revoke the used refresh token (Token Rotation)
-	_ = s.refreshTokenRepo.Revoke(ctx, refreshTokenStr)
+	if rec.Token != "" {
+		_ = s.refreshTokenRepo.Revoke(ctx, rec.Token)
+	}
 
 	newRefreshTokenStr, err = crypto.GenerateToken(32)
 	if err != nil {
@@ -347,6 +327,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*Re
 			return nil, apperrors.Internal("issuing employee access token", err)
 		}
 		_ = s.refreshTokenRepo.Create(ctx, newRefreshTokenStr, user.ID, "employee", user.Email, user.Role, refreshExpiry)
+		empProfile = &EmployeeProfile{ID: user.ID, Name: user.Name, Email: user.Email, Role: user.Role}
 	} else if rec.SubjectType == "distributor" {
 		dist, err := s.distRepo.GetByID(ctx, rec.SubjectID)
 		if err != nil || dist == nil {
@@ -364,36 +345,25 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*Re
 	return &RefreshResult{
 		AccessToken:  newAccessToken,
 		RefreshToken: newRefreshTokenStr,
+		User:         empProfile,
 	}, nil
 }
 
+// RefreshToken delegates to RefreshTokenWithSubject.
+func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (*RefreshResult, error) {
+	return s.RefreshTokenWithSubject(ctx, refreshTokenStr, "", "", "")
+}
+
 // RefreshEmployeeToken ensures only employee refresh tokens can be refreshed by admin endpoints.
-func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken string) (*RefreshResult, error) {
-	if refreshToken == "" {
-		return nil, apperrors.Unauthorized("missing refresh token")
-	}
-	if s.refreshTokenRepo != nil {
-		rec, _ := s.refreshTokenRepo.GetValid(ctx, refreshToken)
-		if rec != nil && rec.SubjectType != "employee" {
-			return nil, apperrors.Unauthorized("invalid employee refresh token")
-		}
-	}
-	return s.RefreshToken(ctx, refreshToken)
+func (s *Service) RefreshEmployeeToken(ctx context.Context, refreshToken, subjectID, email string) (*RefreshResult, error) {
+	return s.RefreshTokenWithSubject(ctx, refreshToken, subjectID, email, "employee")
 }
 
 // RefreshDistributorToken ensures only distributor refresh tokens can be refreshed by distributor endpoints.
-func (s *Service) RefreshDistributorToken(ctx context.Context, refreshToken string) (*RefreshResult, error) {
-	if refreshToken == "" {
-		return nil, apperrors.Unauthorized("missing refresh token")
-	}
-	if s.refreshTokenRepo != nil {
-		rec, _ := s.refreshTokenRepo.GetValid(ctx, refreshToken)
-		if rec != nil && rec.SubjectType != "distributor" {
-			return nil, apperrors.Unauthorized("invalid distributor refresh token")
-		}
-	}
-	return s.RefreshToken(ctx, refreshToken)
+func (s *Service) RefreshDistributorToken(ctx context.Context, refreshToken, distributorID, mobile string) (*RefreshResult, error) {
+	return s.RefreshTokenWithSubject(ctx, refreshToken, distributorID, mobile, "distributor")
 }
+
 
 // Logout revokes and deletes all sessions for the subject and/or the specific refresh token in the database.
 func (s *Service) Logout(ctx context.Context, refreshTokenStr, subjectID, subjectType string) error {
