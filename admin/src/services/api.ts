@@ -1,16 +1,18 @@
-const API_BASE = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8081/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL || '/api/v1';
 
 export function getAuthToken(): string | null {
   return localStorage.getItem('kresconet_admin_token');
 }
 
 export function getRefreshToken(): string | null {
-  return null;
+  return localStorage.getItem('kresconet_admin_refresh_token');
 }
 
-export function setAuthToken(token: string) {
+export function setAuthToken(token: string, refreshToken?: string) {
   localStorage.setItem('kresconet_admin_token', token);
-  localStorage.removeItem('kresconet_admin_refresh_token');
+  if (refreshToken) {
+    localStorage.setItem('kresconet_admin_refresh_token', refreshToken);
+  }
 }
 
 export function clearAuthToken() {
@@ -18,37 +20,61 @@ export function clearAuthToken() {
   localStorage.removeItem('kresconet_admin_refresh_token');
 }
 
-let refreshPromise: Promise<string> | null = null;
+export interface RefreshResponse {
+  token: string;
+  user?: { id: string; name: string; role: string };
+}
 
-export async function refreshAdminSession(): Promise<string> {
+let refreshPromise: Promise<RefreshResponse> | null = null;
+
+export async function refreshAdminSession(): Promise<RefreshResponse> {
   if (refreshPromise) {
     return refreshPromise;
   }
 
   refreshPromise = (async () => {
     try {
+      const refreshToken = getRefreshToken();
+      const savedUserStr = localStorage.getItem('kresconet_admin_user');
+      let savedUser: any = null;
+      if (savedUserStr) {
+        try { savedUser = JSON.parse(savedUserStr); } catch {}
+      }
+
+      const payload: Record<string, string> = {};
+      if (refreshToken) payload.refresh_token = refreshToken;
+      if (savedUser?.id) payload.subject_id = savedUser.id;
+      if (savedUser?.email) payload.email = savedUser.email;
+
       const res = await fetch(`${API_BASE}/auth/employee/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && (data.access_token || data.token)) {
-        const newAccess = data.access_token || data.token;
-        setAuthToken(newAccess);
-        if (data.user) {
-          localStorage.setItem('kresconet_admin_user', JSON.stringify(data.user));
+
+      const json = await res.json().catch(() => ({}));
+      const data = json.data !== undefined ? json.data : json;
+
+      const newAccess = data.access_token || data.token || json.access_token || json.token;
+      const newRefresh = data.refresh_token || json.refresh_token;
+
+      if (res.ok && newAccess) {
+        setAuthToken(newAccess, newRefresh);
+        const userData = data.user || json.user || savedUser;
+        if (userData) {
+          localStorage.setItem('kresconet_admin_user', JSON.stringify(userData));
         }
-        return newAccess;
+        return { token: newAccess, user: userData };
       } else {
-        const msg = data?.error?.message || data?.message || 'Session expired. Please log in again.';
-        clearAuthToken();
-        localStorage.removeItem('kresconet_admin_user');
+        const msg = json?.error?.message || data?.error?.message || json?.message || data?.message || 'Session expired. Please log in again.';
+        if (res.status === 401) {
+          clearAuthToken();
+          localStorage.removeItem('kresconet_admin_user');
+        }
         throw new Error(msg);
       }
     } catch (err) {
-      clearAuthToken();
-      localStorage.removeItem('kresconet_admin_user');
       throw err;
     } finally {
       refreshPromise = null;
@@ -77,8 +103,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (res.status === 401 && !path.includes('/login') && !path.includes('/refresh')) {
     try {
-      const newAccess = await refreshAdminSession();
-      headers['Authorization'] = `Bearer ${newAccess}`;
+      const session = await refreshAdminSession();
+      headers['Authorization'] = `Bearer ${session.token}`;
       res = await fetch(`${API_BASE}${path}`, {
         ...options,
         credentials: 'include',
