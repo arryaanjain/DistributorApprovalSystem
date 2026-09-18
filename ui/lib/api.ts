@@ -49,10 +49,19 @@ export async function fetchApi<T>(
     ) {
       isRefreshing = true;
       try {
+        const refreshToken = localStorage.getItem("kresconet_refresh_token");
+        const distId = localStorage.getItem("kresconet_distributor_id");
+        const mobile = localStorage.getItem("kresconet_mobile");
+        const payload: Record<string, string> = {};
+        if (refreshToken) payload.refresh_token = refreshToken;
+        if (distId) payload.subject_id = distId;
+        if (mobile) payload.mobile = mobile;
+
         const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         });
         const refreshData = await refreshRes.json();
         isRefreshing = false;
@@ -62,8 +71,15 @@ export async function fetchApi<T>(
           refreshData.token ||
           (refreshData.data && (refreshData.data.access_token || refreshData.data.token));
 
+        const newRefreshToken =
+          refreshData.refresh_token ||
+          (refreshData.data && refreshData.data.refresh_token);
+
         if (refreshRes.ok && newToken) {
           localStorage.setItem("kresconet_token", newToken);
+          if (newRefreshToken) {
+            localStorage.setItem("kresconet_refresh_token", newRefreshToken);
+          }
           headers["Authorization"] = `Bearer ${newToken}`;
           res = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
